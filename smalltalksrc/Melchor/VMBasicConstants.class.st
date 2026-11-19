@@ -33,6 +33,7 @@ Class {
 		'HashMultiplyConstant',
 		'HashMultiplyMask',
 		'IMMUTABILITY',
+		'JITDOMAIN',
 		'PRIdSQINT',
 		'PharoVM_VERSION_MAJOR',
 		'PharoVM_VERSION_MINOR',
@@ -102,6 +103,7 @@ VMBasicConstants class >> namesDefinedAtCompileTime [
 	 will be emitted within #if defined(ANameDefinedAtCompileTime)...#endif."
 	^#(	VMBIGENDIAN
 		IMMUTABILITY
+		JITDOMAIN							"RISC-V JITDomain: domain transitions around JIT code"
 		STACKVM COGVM
 		CheckRememberedInTrampoline		"IMMUTABILITY"
 		LLDB									"As of lldb-370.0.42 Swift-3.1, passing funciton parameters to printOopsSuchThat fails with Internal error [IRForTarget]: Couldn't rewrite one of the arguments of a function call.  Turning off link time optimization with -fno-lto has no effect.  hence we define some debugging functions as being <option: LLDB>"

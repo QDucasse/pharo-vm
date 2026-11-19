@@ -69,6 +69,7 @@ VMClass class >> initializeMiscConstants [
 	IMMUTABILITY := InitializationOptions
 		                at: #IMMUTABILITY
 		                ifAbsent: [ true ].
+	JITDOMAIN := InitializationOptions at: #JITDOMAIN ifAbsent: [ false ].
 	WIN32 := InitializationOptions at: #WIN32 ifAbsent: [false].
 	PRIdSQINT := InitializationOptions at: #FormatSqInt ifAbsent: [ 'ld' ].
 	
