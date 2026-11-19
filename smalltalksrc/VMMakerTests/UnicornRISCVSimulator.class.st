@@ -1,6 +1,9 @@
 Class {
 	#name : 'UnicornRISCVSimulator',
 	#superclass : 'UnicornSimulator',
+	#instVars : [
+		'jitDomain'
+	],
 	#category : 'VMMakerTests-Unicorn',
 	#package : 'VMMakerTests',
 	#tag : 'Unicorn'
@@ -145,6 +148,18 @@ UnicornRISCVSimulator >> doublePrecisionFloatingPointRegister1 [
 UnicornRISCVSimulator >> doublePrecisionFloatingPointRegister2 [
 
 	^ UcRISCVRegisters f2
+]
+
+{ #category : 'executing' }
+UnicornRISCVSimulator >> emulateRejectedInstructionAfter: anErrorCode [
+
+	"Unicorn does not know JITDomain: emulate its instructions"
+
+	| pc word |
+	(UnicornConstants isOk: anErrorCode) ifTrue: [ ^ false ].
+	pc := self lastExecutedInstructionAddress.
+	word := (self memoryAt: pc readNext: 4) unsignedLongAt: 1 bigEndian: false.
+	^ self jitDomain emulate: word at: pc in: self
 ]
 
 { #category : 'disassembling' }
@@ -496,6 +511,12 @@ UnicornRISCVSimulator >> instantiateDisassembler [
 UnicornRISCVSimulator >> instructionPointerRegister [
 
 	^ UcRISCVRegisters pc
+]
+
+{ #category : 'jitdomain' }
+UnicornRISCVSimulator >> jitDomain [
+
+	^ jitDomain ifNil: [ jitDomain := JITDomainHartState new ]
 ]
 
 { #category : 'disassembling' }
