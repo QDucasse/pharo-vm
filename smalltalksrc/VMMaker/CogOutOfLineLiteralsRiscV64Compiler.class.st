@@ -65,6 +65,8 @@ Class {
 		'MSTATUS',
 		'MSUB',
 		'MUL',
+		'MoveDMwrR',
+		'MoveRDMwr',
 		'MulCheckOverflowRR',
 		'MulRR',
 		'NE',
@@ -287,7 +289,9 @@ CogOutOfLineLiteralsRiscV64Compiler class >> initialize [
 		"JITDomain (see the jitdomain category)"
 		DomLpad
 		DomCallR
-		DomRet)
+		DomRet
+		MoveDMwrR
+		MoveRDMwr)
 	     in: thisContext method 
 	
 	"When inspecting the Assocation, use the following to add the class variable:
@@ -945,6 +949,8 @@ CogOutOfLineLiteralsRiscV64Compiler >> computeMaximumSize [
 			([ DomLpad ]   -> [ ^ 4 ]).
 			([ DomCallR ]  -> [ ^ 4 ]).
 			([ DomRet ]    -> [ ^ 4 ]).
+			([ MoveDMwrR ] -> [ ^ 4 ]).
+			([ MoveRDMwr ] -> [ ^ 4 ]).
 			
 			"Next jumps are overwritten by branches in noteFollowingConditional:"
 			([ JumpZero ]             -> [ ^ 0 ]).
@@ -1185,6 +1191,43 @@ CogOutOfLineLiteralsRiscV64Compiler >> concretizeDomRet [
 
 	<inline: true>
 	self machineCodeAt: 0 put: self domainReturn.
+	^ machineCodeSize := 4
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> concretizeMoveDMwrR [
+
+	"Typed load of a word at a 12-bit offset from a register: dld destReg, offset(baseReg).
+	 Typed accesses are only generated against bases whose offsets are known to fit (VarBaseReg)."
+
+	<var: #offset type: #sqInt>
+	<inline: true>
+	| offset |
+	offset := operands at: 0.
+	self assert: dependent isNil.
+	self assertValue: offset fitsSigned: 12.
+	self machineCodeAt: 0 put: (self
+		typedLoadDoubleWordFromAddressInRegister: (operands at: 1)
+		withOffset: offset
+		toRegister: (operands at: 2)).
+	^ machineCodeSize := 4
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> concretizeMoveRDMwr [
+
+	"Typed store of a word at a 12-bit offset from a register: dsd srcReg, offset(baseReg)"
+
+	<var: #offset type: #sqInt>
+	<inline: true>
+	| offset |
+	offset := operands at: 1.
+	self assert: dependent isNil.
+	self assertValue: offset fitsSigned: 12.
+	self machineCodeAt: 0 put: (self
+		typedStoreDoubleWordFromRegister: (operands at: 0)
+		toAddressInRegister: (operands at: 2)
+		withOffset: offset).
 	^ machineCodeSize := 4
 ]
 
@@ -3891,6 +3934,8 @@ CogOutOfLineLiteralsRiscV64Compiler >> dispatchConcretize [
 		[DomLpad]   -> [ ^ self concretizeDomLpad ].
 		[DomCallR]  -> [ ^ self concretizeDomCallR ].
 		[DomRet]    -> [ ^ self concretizeDomRet ].
+		[MoveDMwrR] -> [ ^ self concretizeMoveDMwrR ].
+		[MoveRDMwr] -> [ ^ self concretizeMoveRDMwr ].
 				
 		"Logic"						
 		[AndCqR]		-> [ ^ self concretizeAndCqR ].
@@ -6734,6 +6779,34 @@ CogOutOfLineLiteralsRiscV64Compiler >> trailingZerosOf: aNumber [
 	].
 
 	^ zeroBits
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> typedLoadDoubleWordFromAddressInRegister: baseRegister withOffset: offset toRegister: destinationRegister [
+
+	"dld: Loads eight bytes from memory at address x[rs1] + sign-extend(offset) on behalf of the
+	 domain dtarget[curdom], and writes them to x[rd]. Encoded as ld with major opcode custom-0.
+
+	 31           20 19     15 14    12 11     7 6          0
+	|  offset[11:0] |   rs1   |  011   |   rd   |   0001011  |
+	"
+
+	^ (self loadDoubleWordFromAddressInRegister: baseRegister withOffset: offset toRegister: destinationRegister)
+		- 2r0000011 + 2r0001011
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> typedStoreDoubleWordFromRegister: sourceRegister toAddressInRegister: destinationAddressRegister withOffset: offset [
+
+	"dsd: Stores the eight bytes in x[rs2] to memory at address x[rs1] + sign-extend(offset) on behalf of
+	 the domain dtarget[curdom]. Encoded as sd with major opcode custom-1.
+
+	 31            25 24     20 19     15 14    12 11              7 6          0
+	|  offset[11:5]  |   rs2   |   rs1   |  011   |   offset[4:0]   |   0101011  |
+	"
+
+	^ (self storeDoubleWordFromRegister: sourceRegister toAddressInRegister: destinationAddressRegister withOffset: offset)
+		- 2r0100011 + 2r0101011
 ]
 
 { #category : 'concretization' }
