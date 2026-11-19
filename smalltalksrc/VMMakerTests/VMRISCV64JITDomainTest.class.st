@@ -38,7 +38,9 @@ VMRISCV64JITDomainTest >> testEncodingsMatchTheAssembler [
 	self assert: (backEnd typedLoadDoubleWordFromAddressInRegister: 26 withOffset: -2048 toRegister: 10) equals: 16r800D350B.
 	self assert: (backEnd typedLoadDoubleWordFromAddressInRegister: 26 withOffset: 2047 toRegister: 10) equals: 16r7FFD350B.
 	self assert: (backEnd typedStoreDoubleWordFromRegister: 11 toAddressInRegister: 26 withOffset: 8) equals: 16r00BD342B.
-	self assert: (backEnd typedStoreDoubleWordFromRegister: 11 toAddressInRegister: 26 withOffset: -8) equals: 16rFEBD3C2B
+	self assert: (backEnd typedStoreDoubleWordFromRegister: 11 toAddressInRegister: 26 withOffset: -8) equals: 16rFEBD3C2B.
+	self assert: (backEnd csrReadWrite: 16r8C6 register: 5 into: 0) equals: 16r8C629073.
+	self assert: (backEnd csrRead: 16r8C6 into: 5) equals: 16r8C6022F3
 ]
 
 { #category : 'tests - encoding' }
@@ -50,7 +52,9 @@ VMRISCV64JITDomainTest >> testInstructionsAreConcretizedInFourBytes [
 		cogit gen: (self opcode: #DomCallR) operand: 6 operand: 1 operand: 3.
 		cogit gen: (self opcode: #DomRet).
 		cogit gen: (self opcode: #MoveDMwrR) operand: -2048 operand: 26 operand: 10.
-		cogit gen: (self opcode: #MoveRDMwr) operand: 11 operand: 8 operand: 26 ] bytecodes: 10.
-	words := (0 to: 4) collect: [ :i | (machineSimulator memoryAt: start + (4 * i) readNext: 4) unsignedLongAt: 1 bigEndian: false ].
-	self assert: words asArray equals: #( 16r2000205B 16r2033005B 16r0000105B 16r800D350B 16r00BD342B )
+		cogit gen: (self opcode: #MoveRDMwr) operand: 11 operand: 8 operand: 26.
+		cogit gen: (self opcode: #MoveRUdsp) operand: 5.
+		cogit gen: (self opcode: #MoveUdspR) operand: 5 ] bytecodes: 10.
+	words := (0 to: 6) collect: [ :i | (machineSimulator memoryAt: start + (4 * i) readNext: 4) unsignedLongAt: 1 bigEndian: false ].
+	self assert: words asArray equals: #( 16r2000205B 16r2033005B 16r0000105B 16r800D350B 16r00BD342B 16r8C629073 16r8C6022F3 )
 ]
