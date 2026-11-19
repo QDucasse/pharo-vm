@@ -44,8 +44,10 @@ UnicornSimulator >> doStartAt: startAddress until: until timeout: timeout count:
 						stopReason := nil.
 						error signal ].
 
-			"If execution did not stop because of a stop reason, verify the error code"
-			simulator verifyErrorCode: result]
+			"If execution did not stop because of a stop reason, verify the error code,
+			 unless the simulator emulates the rejected instruction itself"
+			(self emulateRejectedInstructionAfter: result)
+				ifFalse: [ simulator verifyErrorCode: result ] ]
 				on: UnicornInvalidMemoryAccess do: [ :invalidAccess |
 
 					self instructionPointerRegisterValue = until ifTrue: [ ^ 0 ].
@@ -71,6 +73,15 @@ UnicornSimulator >> doStartAt: startAddress until: until timeout: timeout count:
 								signal ]].
 			self instructionPointerRegisterValue = until
 				ifTrue: [ ^ result ]]
+]
+
+{ #category : 'executing' }
+UnicornSimulator >> emulateRejectedInstructionAfter: anErrorCode [
+
+	"Unicorn stopped with anErrorCode. Answer whether the instruction it rejected was emulated here,
+	 in which case the instruction pointer was moved past it and execution can go on"
+
+	^ false
 ]
 
 { #category : 'stack-access' }
