@@ -11,6 +11,7 @@ Class {
 		'stackMemoryStartAddress',
 		'stackMemoryEndAddress',
 		'isa',
+		'jitDomain',
 		'obj',
 		'selectorIndex',
 		'sendAddress',
@@ -58,6 +59,7 @@ VMSimpleStackBasedCogitAbstractTest class >> wordSize64Parameters [
 		addCase: { #ISA -> #'aarch64'. #wordSize -> 8};
 		addCase: { #ISA -> #'X64'. #wordSize -> 8};
 		addCase: { #ISA -> #'riscv64'. #wordSize -> 8 };
+		addCase: { #ISA -> #'riscv64'. #wordSize -> 8. #jitDomain -> true };
 		yourself
 ]
 
@@ -506,6 +508,20 @@ VMSimpleStackBasedCogitAbstractTest >> jitCompilerClass [
 	^ SimpleStackBasedCogit
 ]
 
+{ #category : 'accessing' }
+VMSimpleStackBasedCogitAbstractTest >> jitDomain [
+
+	"Whether the JIT generates JITDomain transitions (RISC-V only)"
+
+	^ jitDomain ifNil: [ false ]
+]
+
+{ #category : 'running' }
+VMSimpleStackBasedCogitAbstractTest >> jitDomain: aBoolean [
+
+	jitDomain := aBoolean
+]
+
 { #category : 'helpers' }
 VMSimpleStackBasedCogitAbstractTest >> jitMethod: aHostCompiledMethod [ 
 
@@ -528,6 +544,7 @@ VMSimpleStackBasedCogitAbstractTest >> jitOptions [
 	^ Dictionary newFromPairs: { 
 		#ISA. isa.
 		#IMMUTABILITY. false.
+		#JITDOMAIN. self jitDomain.
 		#COGVM. true.
 		#bytecodeTableInitializer. #initializeBytecodeTableForSistaV1.	
 		#ObjectMemory. self memoryClass name }

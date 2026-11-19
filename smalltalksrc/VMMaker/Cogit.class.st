@@ -5119,7 +5119,11 @@ Cogit >> compileEntry [
 	 different from the alignment of the noCheckEntry so that the method map machinery
 	 can distinguish normal and super sends (super sends bind to the noCheckEntry)."
 
-	entry := objectRepresentation genGetInlineCacheClassTagFrom: ReceiverResultReg into: TempReg.
+	self cppIf: JITDOMAIN
+		ifTrue: [
+			entry := self genEntryPad.
+			objectRepresentation genGetInlineCacheClassTagFrom: ReceiverResultReg into: TempReg ]
+		ifFalse: [ entry := objectRepresentation genGetInlineCacheClassTagFrom: ReceiverResultReg into: TempReg ].
 	self CmpR: ClassReg R: TempReg.
 	self JumpNonZero: sendMiss.
 	noCheckEntry := self Label.
@@ -5148,12 +5152,20 @@ Cogit >> compileFullBlockEntry [
 
 	"Entries"
 	"No context switch entry"
-	fullBlockNoContextSwitchEntry := self MoveCq: 0 R: SendNumArgsReg.
+	self cppIf: JITDOMAIN
+		ifTrue: [
+			fullBlockNoContextSwitchEntry := self genEntryPad.
+			self MoveCq: 0 R: SendNumArgsReg ]
+		ifFalse: [ fullBlockNoContextSwitchEntry := self MoveCq: 0 R: SendNumArgsReg ].
 	jumpNoContextSwitch := self Jump: 0.
 
 	self AlignmentNops: (objectMemory wordSize max: 8).
 	"Context switch entry (use ReceiverResultReg as a non-zero value; it's shorter)."
-	fullBlockEntry := self MoveR: ReceiverResultReg R: SendNumArgsReg.
+	self cppIf: JITDOMAIN
+		ifTrue: [
+			fullBlockEntry := self genEntryPad.
+			self MoveR: ReceiverResultReg R: SendNumArgsReg ]
+		ifFalse: [ fullBlockEntry := self MoveR: ReceiverResultReg R: SendNumArgsReg ].
 	jumpNoContextSwitch jmpTarget: self Label.
 
 	^0
@@ -5207,7 +5219,11 @@ Cogit >> compilePICAbort: numArgs [
 Cogit >> compilePICEntry [
 	<returnTypeC: #'AbstractInstruction *'>
 	"Compile the cache tag computation and the first comparison.  Answer the address of that comparison."
-	entry := objectRepresentation genGetInlineCacheClassTagFrom: ReceiverResultReg into: TempReg.
+	self cppIf: JITDOMAIN
+		ifTrue: [
+			entry := self genEntryPad.
+			objectRepresentation genGetInlineCacheClassTagFrom: ReceiverResultReg into: TempReg ]
+		ifFalse: [ entry := objectRepresentation genGetInlineCacheClassTagFrom: ReceiverResultReg into: TempReg ].
 	self CmpR: ClassReg R: TempReg.
 	^self JumpNonZero: 0
 ]
@@ -6625,6 +6641,18 @@ Cogit >> genEnilopmartReturn: forCall [
 							 self JumpR: RISCTempReg]]]
 		ifFalse:
 			[self RetN: 0]
+]
+
+{ #category : 'jitdomain' }
+Cogit >> genEntryPad [
+
+	"With JITDOMAIN, every entry of machine code (methods, full blocks, PICs) starts with a landing pad into
+	 the JIT domain (DOM1), accepting any label: the VM domain (DOM0) is trusted to choose which entry it enters.
+	 Calls inside the JIT domain execute it as a nop. Answer the pad."
+
+	<returnTypeC: #'AbstractInstruction *'>
+	<option: #JITDOMAIN>
+	^ backEnd genDomainLandingPad: self jitDomainCode label: 0
 ]
 
 { #category : 'trampoline support' }
@@ -8428,6 +8456,16 @@ Cogit >> isTrampolineArgConstant: n [
 	"Test for true and false and 0 to N encoded via trampolineArgConstant:"
 	<inline: true>
 	^n < NoReg
+]
+
+{ #category : 'jitdomain' }
+Cogit >> jitDomainCode [
+
+	"The JIT domain (DOM1): machine code (methods, PICs, the stubs entered from the VM domain), which shares the
+	 heap with the VM"
+
+	<inline: true>
+	^ 1
 ]
 
 { #category : 'disassembly' }
