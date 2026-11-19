@@ -1,4 +1,5 @@
 option(READ_ONLY_CODE_ZONE "Makes Cogit's code zone never writeable and executable at the same time" OFF)
+option(JITDOMAIN "RISC-V JITDomain: run JIT code in its own domain, entered and left through domain transitions" OFF)
 
 # -rpath is a link-time flag; keep it out of CMAKE_C_FLAGS so it isn't passed to
 # every compile step (which makes clang emit -Wunused-command-line-argument).
@@ -106,6 +107,9 @@ endmacro()
 macro(add_required_libs_per_platform)
   if(READ_ONLY_CODE_ZONE)
     target_compile_definitions(${VM_LIBRARY_NAME} PRIVATE READ_ONLY_CODE_ZONE=1)
+  endif()
+  if(JITDOMAIN)
+    target_compile_definitions(${VM_LIBRARY_NAME} PRIVATE JITDOMAIN=1)
   endif()
   target_link_libraries(${VM_LIBRARY_NAME} dl)
   target_link_libraries(${VM_LIBRARY_NAME} m)
