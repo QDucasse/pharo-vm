@@ -14,7 +14,7 @@ Class {
 VMRISCV64JITDomainTest class >> wordSizeParameters [
 
 	^ ParametrizedTestMatrix new
-		addCase: { #ISA -> #'riscv64' . #wordSize -> 8 };
+		addCase: { #ISA -> #'riscv64' . #wordSize -> 8 . #jitDomain -> true };
 		yourself
 ]
 
@@ -83,7 +83,28 @@ VMRISCV64JITDomainTest >> should: aBlock faultWith: aSubcode [
 VMRISCV64JITDomainTest >> setUp [
 
 	super setUp.
-	self hart dsp: 16r10000
+	self hart
+		dspbase: 16r10000;
+		dsp: 16r10000
+]
+
+{ #category : 'helpers' }
+VMRISCV64JITDomainTest >> runUdsp: funct3 rs1: rs1 source: aValue [
+
+	"Run one CSR instruction on udsp, with rd = ClassReg (x23) and, for the register forms, rs1 = TempReg (x22)
+	 holding aValue. The backend only emits csrw and csrr, so the csrr is patched into the form under test."
+
+	| startToEnd word |
+	startToEnd := self compileWithEnd: [
+		cogit MoveCq: aValue R: TempReg.
+		cogit MoveCq: 16r5A R: ClassReg.
+		cogit gen: (self opcode: #MoveUdspR) operand: ClassReg ].
+	word := 16r8C6 << 20 bitOr: (rs1 << 15 bitOr: (funct3 << 12 bitOr: (23 << 7 bitOr: 16r73))).
+	machineSimulator
+		memoryAt: startToEnd value - 4
+		write: ((ByteArray new: 4) unsignedLongAt: 1 put: word bigEndian: false; yourself)
+		size: 4.
+	self runFromTo: startToEnd
 ]
 
 { #category : 'tests - execution' }
@@ -201,6 +222,104 @@ VMRISCV64JITDomainTest >> testTypedStoreThenTypedLoad [
 	self assert: machineSimulator receiverRegisterValue equals: 99.
 	self assert: (memory fetchPointer: 1 ofObject: object) equals: 99.
 	self assert: (self hart events collect: [ :e | e first ]) asArray equals: #( #typedStore #typedLoad )
+]
+
+{ #category : 'tests - execution' }
+VMRISCV64JITDomainTest >> testUdspClearFormBelowDspFaultsWithDsprange [
+
+	self hart dsp: 16rF800.
+	self should: [ self runUdsp: 3 rs1: 22 source: 16r0800 ] faultWith: #DSPRANGE.
+	self assert: self hart dsp equals: 16rF800.
+	self assert: machineSimulator classRegisterValue equals: 16r5A
+]
+
+{ #category : 'tests - execution' }
+VMRISCV64JITDomainTest >> testUdspIsNotReadableOutsideDomainZero [
+
+	self hart curdom: 1.
+	self should: [ self runFromTo: (self compileWithEnd: [ cogit gen: (self opcode: #MoveUdspR) operand: ClassReg ]) ]
+		faultWith: #DSP
+]
+
+{ #category : 'tests - execution' }
+VMRISCV64JITDomainTest >> testUdspIsNotWritableOutsideDomainZero [
+
+	"DSP beats DSPRANGE: 16r2000 is also below dsp"
+
+	self hart curdom: 1.
+	self should: [
+		self runFromTo: (self compileWithEnd: [
+			cogit MoveCq: 16r2000 R: TempReg.
+			cogit gen: (self opcode: #MoveRUdsp) operand: TempReg ]) ] faultWith: #DSP.
+	self assert: self hart dsp equals: 16r10000
+]
+
+{ #category : 'tests - execution' }
+VMRISCV64JITDomainTest >> testUdspReadsAreNeverRangeChecked [
+
+	"dsp above dspbase: every write faults, but csrrs/csrrc with rs1 = x0 or a zero immediate only read"
+
+	self hart dsp: 16r20000.
+	#( 2 3 6 7 ) do: [ :funct3 |
+		self runUdsp: funct3 rs1: 0 source: 0.
+		self assert: machineSimulator classRegisterValue equals: 16r20000 ].
+	self assert: self hart dsp equals: 16r20000
+]
+
+{ #category : 'tests - execution' }
+VMRISCV64JITDomainTest >> testUdspSetFormWithAZeroRegisterIsAWrite [
+
+	"rs1 is not x0, so csrrs writes dsp | 0 = dsp, which is checked: above dspbase it faults"
+
+	self hart dsp: 16r20000.
+	self should: [ self runUdsp: 2 rs1: 22 source: 0 ] faultWith: #DSPRANGE.
+	self assert: machineSimulator classRegisterValue equals: 16r5A
+]
+
+{ #category : 'tests - execution' }
+VMRISCV64JITDomainTest >> testUdspSetFormsWriteTheMergedValue [
+
+	self hart dsp: 16rF000.
+	self runUdsp: 2 rs1: 22 source: 16r0800.
+	self assert: self hart dsp equals: 16rF800.
+	self assert: machineSimulator classRegisterValue equals: 16rF000.
+	"csrrsi with the immediate 8"
+	self runUdsp: 6 rs1: 8 source: 0.
+	self assert: self hart dsp equals: 16rF808.
+	self assert: machineSimulator classRegisterValue equals: 16rF800
+]
+
+{ #category : 'tests - execution' }
+VMRISCV64JITDomainTest >> testUdspWriteAboveDspbaseFaultsWithDsprange [
+
+	self hart dsp: 16rF000.
+	self should: [ self runUdsp: 1 rs1: 22 source: 16r10008 ] faultWith: #DSPRANGE.
+	self assert: self hart dsp equals: 16rF000
+]
+
+{ #category : 'tests - execution' }
+VMRISCV64JITDomainTest >> testUdspWriteBelowDspFaultsWithDsprange [
+
+	"Moving dsp down would replay popped records"
+
+	self hart dsp: 16rF000.
+	self should: [
+		self runFromTo: (self compileWithEnd: [
+			cogit MoveCq: 16rE000 R: TempReg.
+			cogit gen: (self opcode: #MoveRUdsp) operand: TempReg ]) ] faultWith: #DSPRANGE.
+	self assert: self hart dsp equals: 16rF000
+]
+
+{ #category : 'tests - execution' }
+VMRISCV64JITDomainTest >> testUdspWriteMovesDspUpToDspbase [
+
+	self hart dsp: 16rF000.
+	self runFromTo: (self compileWithEnd: [
+		cogit MoveCq: 16r10000 R: TempReg.
+		cogit gen: (self opcode: #MoveRUdsp) operand: TempReg.
+		cogit gen: (self opcode: #MoveUdspR) operand: ClassReg ]).
+	self assert: self hart dsp equals: 16r10000.
+	self assert: machineSimulator classRegisterValue equals: 16r10000
 ]
 
 { #category : 'tests - execution' }

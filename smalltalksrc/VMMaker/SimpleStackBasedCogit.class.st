@@ -768,7 +768,11 @@ SimpleStackBasedCogit >> compileMegamorphicIC: selector numArgs: numArgs [
 	<flag: #lookupInMethodCacheSel:classTag:> "so this method shows up as a sender of lookupInMethodCacheSel:class:"
 	self preenMethodLabel.
 	self compilePICAbort: numArgs.
-	entry := objectRepresentation genGetClassTagOf: ReceiverResultReg into: SendNumArgsReg scratchReg: TempReg.
+	self cppIf: JITDOMAIN
+		ifTrue: [
+			entry := self genEntryPad.
+			objectRepresentation genGetClassTagOf: ReceiverResultReg into: SendNumArgsReg scratchReg: TempReg ]
+		ifFalse: [ entry := objectRepresentation genGetClassTagOf: ReceiverResultReg into: SendNumArgsReg scratchReg: TempReg ].
 
 	cacheBaseReg := NoReg.
 	(backEnd isWithinMwOffsetRange: coInterpreter methodCacheAddress asUnsignedInteger) ifFalse:
