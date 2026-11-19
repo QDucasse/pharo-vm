@@ -189,6 +189,21 @@ VMRISCV64JITDomainTest >> testPadReachedWithoutDomainCallIsANop [
 ]
 
 { #category : 'tests - execution' }
+VMRISCV64JITDomainTest >> testTypedStoreThenTypedLoad [
+
+	| object |
+	object := self newObjectWithSlots: 2.
+	self runFromTo: (self compileWithEnd: [
+		cogit MoveCw: object R: TempReg.
+		cogit MoveCq: 99 R: ClassReg.
+		cogit gen: (self opcode: #MoveRDMwr) operand: ClassReg operand: 16 operand: TempReg.
+		cogit gen: (self opcode: #MoveDMwrR) operand: 16 operand: TempReg operand: ReceiverResultReg ]).
+	self assert: machineSimulator receiverRegisterValue equals: 99.
+	self assert: (memory fetchPointer: 1 ofObject: object) equals: 99.
+	self assert: (self hart events collect: [ :e | e first ]) asArray equals: #( #typedStore #typedLoad )
+]
+
+{ #category : 'tests - execution' }
 VMRISCV64JITDomainTest >> testWildcardPadAcceptsAnyLabel [
 
 	| callee |

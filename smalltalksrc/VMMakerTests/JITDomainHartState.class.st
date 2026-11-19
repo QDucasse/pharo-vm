@@ -3,7 +3,8 @@ I model the JITDomain state of one RISC-V hart for the Unicorn simulator, which 
 UnicornRISCVSimulator hands me the instructions Unicorn rejects; I emulate the ones of the extension:
 
 - domcall, domret and domlpad (custom-2), with the Domain Return Stack kept here, not in simulated memory:
-  this models the DRS key, which no ordinary or typed access may touch.
+  this models the DRS key, which no ordinary or typed access may touch;
+- the typed loads and stores dl*/ds* (custom-0/1) as plain accesses: keys and rights are not modelled.
 
 A domcall checks dgate, pushes the DRS and then checks at once that its target is a matching, 4-byte aligned domlpad,
 which it executes: the pad is the next instruction the hart would fetch. Violations signal JITDomainFault.
@@ -112,6 +113,8 @@ JITDomainHartState >> emulate: word at: pc in: aSimulator [
 			aSimulator instructionPointerRegisterValue: pc + 4.
 			^ true ].
 		^ false ].
+	(opcode = 2r0001011 and: [ funct3 ~= 7 ]) ifTrue: [ self typedLoadAt: pc word: word in: aSimulator. ^ true ].
+	(opcode = 2r0101011 and: [ funct3 < 4 ]) ifTrue: [ self typedStoreAt: pc word: word in: aSimulator. ^ true ].
 	^ false
 ]
 
@@ -159,4 +162,40 @@ JITDomainHartState >> register: aNumber put: aValue in: aSimulator [
 	aSimulator
 		writeRegister: (UcRISCVRegisters perform: ('x' , aNumber printString) asSymbol)
 		value: (aValue \\ (2 raisedTo: 64))
+]
+
+{ #category : 'emulation' }
+JITDomainHartState >> signExtend: aValue bits: aNumber [
+
+	^ aValue >= (1 << (aNumber - 1))
+		ifTrue: [ aValue - (1 << aNumber) ]
+		ifFalse: [ aValue ]
+]
+
+{ #category : 'emulation' }
+JITDomainHartState >> typedLoadAt: pc word: word in: aSimulator [
+
+	| funct3 size address value |
+	funct3 := word >> 12 bitAnd: 7.
+	size := 1 << (funct3 bitAnd: 3).
+	address := (self register: (word >> 15 bitAnd: 31) in: aSimulator)
+		+ (self signExtend: word >> 20 bits: 12) \\ (2 raisedTo: 64).
+	value := (aSimulator memoryAt: address readNext: size) integerAt: 1 size: size signed: funct3 < 4.
+	self register: (word >> 7 bitAnd: 31) put: value in: aSimulator.
+	events add: { #typedLoad. pc. address. size }.
+	aSimulator instructionPointerRegisterValue: pc + 4
+]
+
+{ #category : 'emulation' }
+JITDomainHartState >> typedStoreAt: pc word: word in: aSimulator [
+
+	| size offset address bytes |
+	size := 1 << (word >> 12 bitAnd: 3).
+	offset := self signExtend: (word >> 25 << 5 bitOr: (word >> 7 bitAnd: 31)) bits: 12.
+	address := (self register: (word >> 15 bitAnd: 31) in: aSimulator) + offset \\ (2 raisedTo: 64).
+	bytes := ByteArray new: 8.
+	bytes integerAt: 1 put: (self register: (word >> 20 bitAnd: 31) in: aSimulator) size: 8 signed: false.
+	aSimulator memoryAt: address write: (bytes first: size) size: size.
+	events add: { #typedStore. pc. address. size }.
+	aSimulator instructionPointerRegisterValue: pc + 4
 ]
