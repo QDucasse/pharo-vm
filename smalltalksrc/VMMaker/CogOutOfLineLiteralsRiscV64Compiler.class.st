@@ -67,6 +67,8 @@ Class {
 		'MUL',
 		'MoveDMwrR',
 		'MoveRDMwr',
+		'MoveRUdsp',
+		'MoveUdspR',
 		'MulCheckOverflowRR',
 		'MulRR',
 		'NE',
@@ -77,6 +79,7 @@ Class {
 		'SP',
 		'SubCheckOverflowCqR',
 		'SubCheckOverflowRR',
+		'UDSP',
 		'X0',
 		'X1',
 		'X10',
@@ -257,6 +260,9 @@ CogOutOfLineLiteralsRiscV64Compiler class >> initialize [
 	LTU := 2r110. "bltu: Less Than Unsigned"
 	
 	MSTATUS := 2r001100000000. "mstatus csr"
+	"JITDomain: U-mode alias of the dsp CSR, usable only in the VM domain (DOM0); writes stay in [dsp, dspbase].
+	 The spec marks the number provisional (user custom read/write range)."
+	UDSP := 16r8C6.
 	
 	"Specific opcodes"
 	self initializeSpecificOpcodes: #(
@@ -291,7 +297,9 @@ CogOutOfLineLiteralsRiscV64Compiler class >> initialize [
 		DomCallR
 		DomRet
 		MoveDMwrR
-		MoveRDMwr)
+		MoveRDMwr
+		MoveRUdsp
+		MoveUdspR)
 	     in: thisContext method 
 	
 	"When inspecting the Assocation, use the following to add the class variable:
@@ -951,6 +959,8 @@ CogOutOfLineLiteralsRiscV64Compiler >> computeMaximumSize [
 			([ DomRet ]    -> [ ^ 4 ]).
 			([ MoveDMwrR ] -> [ ^ 4 ]).
 			([ MoveRDMwr ] -> [ ^ 4 ]).
+			([ MoveRUdsp ] -> [ ^ 4 ]).
+			([ MoveUdspR ] -> [ ^ 4 ]).
 			
 			"Next jumps are overwritten by branches in noteFollowingConditional:"
 			([ JumpZero ]             -> [ ^ 0 ]).
@@ -1229,6 +1239,55 @@ CogOutOfLineLiteralsRiscV64Compiler >> concretizeMoveRDMwr [
 		toAddressInRegister: (operands at: 2)
 		withOffset: offset).
 	^ machineCodeSize := 4
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> concretizeMoveRUdsp [
+
+	"csrw udsp, srcReg: resets the Domain Return Stack pointer (VM domain only)"
+
+	<inline: true>
+	self machineCodeAt: 0 put: (self csrReadWrite: UDSP register: (operands at: 0) into: X0).
+	^ machineCodeSize := 4
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> concretizeMoveUdspR [
+
+	"csrr destReg, udsp"
+
+	<inline: true>
+	self machineCodeAt: 0 put: (self csrRead: UDSP into: (operands at: 0)).
+	^ machineCodeSize := 4
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> csrRead: csr into: destinationRegister [
+
+	"csrr: csrrs x[rd], csr, x0: Reads the CSR into x[rd].
+
+	 31           20 19     15 14    12 11     7 6          0
+	|      csr      |  00000  |  010   |   rd   |   1110011  |
+	"
+
+	^ (((csr bitAnd: 16rfff) << 20)
+		bitOr: 2r010 << 12)
+		bitOr: ((destinationRegister bitAnd: 16r1f) << 7 bitOr: 2r1110011)
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> csrReadWrite: csr register: sourceRegister into: destinationRegister [
+
+	"csrrw: Writes x[rs1] to the CSR and its previous value to x[rd] (csrw is csrrw x0, csr, rs1).
+
+	 31           20 19     15 14    12 11     7 6          0
+	|      csr      |   rs1   |  001   |   rd   |   1110011  |
+	"
+
+	^ (((csr bitAnd: 16rfff) << 20
+		bitOr: (sourceRegister bitAnd: 16r1f) << 15)
+		bitOr: 2r001 << 12)
+		bitOr: ((destinationRegister bitAnd: 16r1f) << 7 bitOr: 2r1110011)
 ]
 
 { #category : 'jitdomain' }
@@ -3936,6 +3995,8 @@ CogOutOfLineLiteralsRiscV64Compiler >> dispatchConcretize [
 		[DomRet]    -> [ ^ self concretizeDomRet ].
 		[MoveDMwrR] -> [ ^ self concretizeMoveDMwrR ].
 		[MoveRDMwr] -> [ ^ self concretizeMoveRDMwr ].
+		[MoveRUdsp] -> [ ^ self concretizeMoveRUdsp ].
+		[MoveUdspR] -> [ ^ self concretizeMoveUdspR ].
 				
 		"Logic"						
 		[AndCqR]		-> [ ^ self concretizeAndCqR ].
