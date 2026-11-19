@@ -752,6 +752,17 @@ CogAbstractInstruction >> genCaptureCStackPointers: captureFramePointer [
 	cogit RetN: 0.
 ]
 
+{ #category : 'jitdomain' }
+CogAbstractInstruction >> genDomainLandingPad: domain label: label [
+
+	"Generate a JITDomain landing pad and answer it. Only the RISC-V backend implements JITDomain."
+
+	<returnTypeC: #'AbstractInstruction *'>
+	<option: #JITDOMAIN>
+	self unreachable.
+	^ nil
+]
+
 { #category : 'abstract instructions' }
 CogAbstractInstruction >> genJumpFPEqual: jumpTarget [
 	<inline: true>

@@ -44,6 +44,9 @@ Class {
 		'ConcreteVarBaseReg',
 		'ConcreteZeroReg',
 		'DivRR',
+		'DomCallR',
+		'DomLpad',
+		'DomRet',
 		'EQ',
 		'F0',
 		'F1',
@@ -280,7 +283,11 @@ CogOutOfLineLiteralsRiscV64Compiler class >> initialize [
 		BrFPLessRR
 		BrFPLessEqualRR
 		BrFPGreaterRR
-		BrFPGreaterEqualRR) 
+		BrFPGreaterEqualRR
+		"JITDomain (see the jitdomain category)"
+		DomLpad
+		DomCallR
+		DomRet)
 	     in: thisContext method 
 	
 	"When inspecting the Assocation, use the following to add the class variable:
@@ -933,6 +940,11 @@ CogOutOfLineLiteralsRiscV64Compiler >> computeMaximumSize [
 			([ JumpLong ]             -> [ ^ self jumpLongByteSize ]).
 			([ RetN ] -> [ ^ (operands at: 0) = 0 ifTrue: [ 4 ] ifFalse: [ 8 ] ]).
 			([ Stop ] -> [ ^ 4 ]).
+
+			"JITDomain"
+			([ DomLpad ]   -> [ ^ 4 ]).
+			([ DomCallR ]  -> [ ^ 4 ]).
+			([ DomRet ]    -> [ ^ 4 ]).
 			
 			"Next jumps are overwritten by branches in noteFollowingConditional:"
 			([ JumpZero ]             -> [ ^ 0 ]).
@@ -1146,6 +1158,103 @@ CogOutOfLineLiteralsRiscV64Compiler >> computeMaximumSize [
 			}.
 	"Noops & Pseudo Ops"
 	^ 0 "to keep C compiler qui Unmatched "
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> concretizeDomCallR [
+
+	"domcall x0, targetReg, domain, label. See domainCallTo:domain:label:"
+
+	<inline: true>
+	self machineCodeAt: 0 put: (self domainCallTo: (operands at: 0) domain: (operands at: 1) label: (operands at: 2)).
+	^ machineCodeSize := 4
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> concretizeDomLpad [
+
+	"domlpad domain, label. Must be 4-byte aligned, as every instruction of this backend."
+
+	<inline: true>
+	self machineCodeAt: 0 put: (self domainLandingPad: (operands at: 0) label: (operands at: 1)).
+	^ machineCodeSize := 4
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> concretizeDomRet [
+
+	<inline: true>
+	self machineCodeAt: 0 put: self domainReturn.
+	^ machineCodeSize := 4
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> domainCallTo: targetRegister domain: domain label: label [
+
+	"domcall: Checks dgate[curdom] for domain, pushes {pc+4, curdom} on the Domain Return Stack, jumps to
+	 x[rs1] & ~1 and sets the pending entry {domain, label}: the target must be a matching domlpad.
+	 rd is x0: the return pc is on the DRS, and the link register keeps the return address of the
+	 call that led here.
+
+	 31        29 28          20 19     15 14    12 11     7 6          0
+	|  domain   |    label     |   rs1   |  000   |   rd   |   1011011  |
+	"
+
+	^ self domainTransition: 2r000 register: targetRegister immediate: (self domainImmediate: domain label: label)
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> domainImmediate: domain label: label [
+
+	"The immediate of domcall and domlpad: the domain in imm[11:9], the label in imm[8:0]"
+
+	self assertValue: domain fitsUnsigned: 3.
+	self assertValue: label fitsUnsigned: 9.
+	^ domain << 9 bitOr: label
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> domainLandingPad: domain label: label [
+
+	"domlpad: Landing pad of a domain transition. Matches a pending entry {domain, label}
+	 (label 0 matches any label) and then enters the domain. Executes as a nop outside a transition.
+
+	 31        29 28          20 19     15 14    12 11     7 6          0
+	|  domain   |    label     |  00000  |  010   |  00000 |   1011011  |
+	"
+
+	^ self domainTransition: 2r010 register: X0 immediate: (self domainImmediate: domain label: label)
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> domainReturn [
+
+	"domret: Pops {pc, domain} from the Domain Return Stack, jumps to pc and enters domain.
+
+	 31                  20 19     15 14    12 11     7 6          0
+	|        000000000000  |  00000  |  001   |  00000 |   1011011  |
+	"
+
+	^ self domainTransition: 2r001 register: X0 immediate: 0
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> domainTransition: funct3 register: sourceRegister immediate: immediate [
+
+	"The domain transitions are I-type instructions with major opcode custom-2 (1011011) and rd = x0"
+
+	^ (((immediate bitAnd: 16rfff) << 20
+		bitOr: (sourceRegister bitAnd: 16r1f) << 15)
+		bitOr: funct3 << 12)
+		bitOr: 2r1011011
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> genDomainLandingPad: domain label: label [
+
+	<returnTypeC: #'AbstractInstruction *'>
+	<option: #JITDOMAIN>
+	^ cogit gen: DomLpad operand: domain operand: label
 ]
 
 { #category : 'helpers - size sign' }
@@ -3777,6 +3886,11 @@ CogOutOfLineLiteralsRiscV64Compiler >> dispatchConcretize [
 		[JumpFPUnordered]			-> [ ^ self concretizeUnimplemented ].
 		[RetN]	 -> [ ^ self concretizeRetN ].
 		[Stop]	 -> [ ^ self concretizeStop ].
+
+		"JITDomain"
+		[DomLpad]   -> [ ^ self concretizeDomLpad ].
+		[DomCallR]  -> [ ^ self concretizeDomCallR ].
+		[DomRet]    -> [ ^ self concretizeDomRet ].
 				
 		"Logic"						
 		[AndCqR]		-> [ ^ self concretizeAndCqR ].
