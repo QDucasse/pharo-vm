@@ -10,6 +10,12 @@ Class {
 }
 
 { #category : 'as yet unclassified' }
+UnicornProcessor >> a0: anInteger [
+
+	machineSimulator a0: anInteger
+]
+
+{ #category : 'as yet unclassified' }
 UnicornProcessor >> a4: anInteger [ 
 	
 	machineSimulator a4: anInteger
