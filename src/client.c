@@ -36,6 +36,11 @@ void mtfsfi(unsigned long long fpscr)
 #endif
 
 static int loadPharoImage(char* fileName);
+
+#if JITDOMAIN
+extern void jitdomainEnable(void);
+extern void jitdomainThreadInit(void);
+#endif
 static void* runVMThread(void* p);
 static int runOnMainThread(VMParameters *parameters);
 #ifdef PHARO_VM_IN_WORKER_THREAD
@@ -233,6 +238,12 @@ static void*
 runVMThread(void* p)
 {
     VMParameters *parameters = (VMParameters*)p;
+
+#if JITDOMAIN
+    // Before the code zone exists: this thread runs Smalltalk, hence needs a DRS
+    jitdomainEnable();
+    jitdomainThreadInit();
+#endif
 
     if(!vm_init(parameters))
     {
