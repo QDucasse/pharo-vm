@@ -44,6 +44,7 @@ Class {
 		'ConcreteVarBaseReg',
 		'ConcreteZeroReg',
 		'DivRR',
+		'DomCall',
 		'DomCallR',
 		'DomLpad',
 		'DomRet',
@@ -294,6 +295,7 @@ CogOutOfLineLiteralsRiscV64Compiler class >> initialize [
 		BrFPGreaterEqualRR
 		"JITDomain (see the jitdomain category)"
 		DomLpad
+		DomCall
 		DomCallR
 		DomRet
 		MoveDMwrR
@@ -955,6 +957,7 @@ CogOutOfLineLiteralsRiscV64Compiler >> computeMaximumSize [
 
 			"JITDomain"
 			([ DomLpad ]   -> [ ^ 4 ]).
+			([ DomCall ]   -> [ ^ 12 ]).
 			([ DomCallR ]  -> [ ^ 4 ]).
 			([ DomRet ]    -> [ ^ 4 ]).
 			([ MoveDMwrR ] -> [ ^ 4 ]).
@@ -1177,6 +1180,22 @@ CogOutOfLineLiteralsRiscV64Compiler >> computeMaximumSize [
 ]
 
 { #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> concretizeDomCall [
+
+	"auipc/addi x5, target; domcall x0, x5, domain, label. The target is in code space, like a Call's"
+
+	<inline: true>
+	| offset |
+	self assert: (operands at: 0) \\ 4 = 0.
+	offset := (operands at: 0) signedIntFromLong - address signedIntFromLong.
+	self assert: (self isInLongJumpCallRange: offset).
+	self machineCodeAt: 0 put: (self addUpperImmediateToPC: (self high20BitsOf: offset) toRegister: ConcreteIPReg).
+	self machineCodeAt: 4 put: (self addImmediate: (self low12BitsOf: offset) toRegister: ConcreteIPReg inRegister: ConcreteIPReg).
+	self machineCodeAt: 8 put: (self domainCallTo: ConcreteIPReg domain: (operands at: 1) label: (operands at: 2)).
+	^ machineCodeSize := 12
+]
+
+{ #category : 'jitdomain' }
 CogOutOfLineLiteralsRiscV64Compiler >> concretizeDomCallR [
 
 	"domcall x0, targetReg, domain, label. See domainCallTo:domain:label:"
@@ -1352,11 +1371,43 @@ CogOutOfLineLiteralsRiscV64Compiler >> domainTransition: funct3 register: source
 ]
 
 { #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> genDomainCallTo: anAddress domain: domain label: label [
+
+	<returnTypeC: #'AbstractInstruction *'>
+	<option: #JITDOMAIN>
+	^ cogit gen: DomCall operand: anAddress operand: domain operand: label
+]
+
+{ #category : 'jitdomain' }
 CogOutOfLineLiteralsRiscV64Compiler >> genDomainLandingPad: domain label: label [
 
 	<returnTypeC: #'AbstractInstruction *'>
 	<option: #JITDOMAIN>
 	^ cogit gen: DomLpad operand: domain operand: label
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> genDomainReturn [
+
+	<returnTypeC: #'AbstractInstruction *'>
+	<option: #JITDOMAIN>
+	^ cogit gen: DomRet
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> genMoveRUdsp: reg [
+
+	<returnTypeC: #'AbstractInstruction *'>
+	<option: #JITDOMAIN>
+	^ cogit gen: MoveRUdsp operand: reg
+]
+
+{ #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> genMoveUdspR: reg [
+
+	<returnTypeC: #'AbstractInstruction *'>
+	<option: #JITDOMAIN>
+	^ cogit gen: MoveUdspR operand: reg
 ]
 
 { #category : 'helpers - size sign' }
@@ -3991,6 +4042,7 @@ CogOutOfLineLiteralsRiscV64Compiler >> dispatchConcretize [
 
 		"JITDomain"
 		[DomLpad]   -> [ ^ self concretizeDomLpad ].
+		[DomCall]   -> [ ^ self concretizeDomCall ].
 		[DomCallR]  -> [ ^ self concretizeDomCallR ].
 		[DomRet]    -> [ ^ self concretizeDomRet ].
 		[MoveDMwrR] -> [ ^ self concretizeMoveDMwrR ].

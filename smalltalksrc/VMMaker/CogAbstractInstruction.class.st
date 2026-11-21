@@ -753,9 +753,29 @@ CogAbstractInstruction >> genCaptureCStackPointers: captureFramePointer [
 ]
 
 { #category : 'jitdomain' }
+CogAbstractInstruction >> genDomainCallTo: anAddress domain: domain label: label [
+
+	"Generate a domain call to anAddress (in code space) and answer it. Only the RISC-V backend implements JITDomain."
+
+	<returnTypeC: #'AbstractInstruction *'>
+	<option: #JITDOMAIN>
+	self unreachable.
+	^ nil
+]
+
+{ #category : 'jitdomain' }
 CogAbstractInstruction >> genDomainLandingPad: domain label: label [
 
 	"Generate a JITDomain landing pad and answer it. Only the RISC-V backend implements JITDomain."
+
+	<returnTypeC: #'AbstractInstruction *'>
+	<option: #JITDOMAIN>
+	self unreachable.
+	^ nil
+]
+
+{ #category : 'jitdomain' }
+CogAbstractInstruction >> genDomainReturn [
 
 	<returnTypeC: #'AbstractInstruction *'>
 	<option: #JITDOMAIN>
@@ -884,6 +904,28 @@ CogAbstractInstruction >> genMoveM32: offset r: baseReg R: destReg [
 		  quickConstant: offset
 		  operand: baseReg
 		  operand: destReg
+]
+
+{ #category : 'jitdomain' }
+CogAbstractInstruction >> genMoveRUdsp: reg [
+
+	"Move the Domain Return Stack pointer to the value of reg (VM domain only)"
+
+	<returnTypeC: #'AbstractInstruction *'>
+	<option: #JITDOMAIN>
+	self unreachable.
+	^ nil
+]
+
+{ #category : 'jitdomain' }
+CogAbstractInstruction >> genMoveUdspR: reg [
+
+	"Read the Domain Return Stack pointer into reg"
+
+	<returnTypeC: #'AbstractInstruction *'>
+	<option: #JITDOMAIN>
+	self unreachable.
+	^ nil
 ]
 
 { #category : 'abstract instructions' }
