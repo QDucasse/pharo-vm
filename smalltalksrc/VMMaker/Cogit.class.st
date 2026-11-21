@@ -514,7 +514,7 @@ Cogit class >> declareCVarsIn: aCCodeGenerator [
 				'sqInt directedSuperBindingSendTrampolines[NumSendTrampolines]' ].
 	aCCodeGenerator
 		var: #trampolineAddresses
-		declareC: 'static char *trampolineAddresses[NumTrampolines*2]';
+		declareC: 'static char *trampolineAddresses[NumTrampolines*4]';
 		var: #objectReferencesInRuntime
 		declareC:
 			'static usqInt objectReferencesInRuntime[NumObjRefsInRuntime+1]';
@@ -10676,10 +10676,20 @@ Cogit >> recordEventTrace [
 
 { #category : 'initialization' }
 Cogit >> recordGeneratedRunTime: aString address: address [
+	"Keep the table sorted by address, as codeEntryFor: expects, even when routines are not generated in
+	 address order"
 	<var: #aString type: #'char *'>
+	| i |
+	self assert: trampolineTableIndex + 2 <= (NumTrampolines * 4).
+	i := trampolineTableIndex.
+	[i > 0 and: [(trampolineAddresses at: i - 1) > (self cCoerceSimple: address to: #'char *')]] whileTrue:
+		[trampolineAddresses
+			at: i put: (trampolineAddresses at: i - 2);
+			at: i + 1 put: (trampolineAddresses at: i - 1).
+		 i := i - 2].
 	trampolineAddresses
-		at: trampolineTableIndex put: aString;
-		at: trampolineTableIndex + 1 put: (self cCoerceSimple: address to: #'char *').
+		at: i put: aString;
+		at: i + 1 put: (self cCoerceSimple: address to: #'char *').
 	trampolineTableIndex := trampolineTableIndex + 2
 ]
 
@@ -11263,7 +11273,7 @@ Cogit >> setInterpreter: aCoInterpreter [
 	runtimeObjectRefIndex := 0.
 	"debug metadata"
 	trampolineAddresses := CArrayAccessor on:
-		                       (Array new: NumTrampolines * 2).
+		                       (Array new: NumTrampolines * 4).
 	trampolineTableIndex := 0.
 
 	extA := numExtB := extB := 0.
