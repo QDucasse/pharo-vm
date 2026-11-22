@@ -3710,6 +3710,14 @@ StackInterpreter >> cannotAssign: resultObj to: targetObj withIndex: index [
 	^ self normalSend
 ]
 
+{ #category : 'callback support' }
+StackInterpreter >> captureJitDomainUdspBase [
+
+	"Entering an execution level (start-up or a callback). Only the JIT has something to do: see CoInterpreter"
+
+	<inline: true>
+]
+
 { #category : 'indexing primitive support' }
 StackInterpreter >> characterForAscii: ascii [  "Above ObjectMemory, arg must lie in range 0-255!"
 	<inline: true>
@@ -7471,6 +7479,7 @@ StackInterpreter >> initStackPagesAndInterpret [
 	self loadInitialContext.
 	"We're ready for the heartbeat (poll interrupt)"
 	self ioInitHeartbeat.
+	self captureJitDomainUdspBase.
 	self initialEnterSmalltalkExecutive.
 	^nil
 ]

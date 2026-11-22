@@ -204,6 +204,9 @@ Class {
 		'ceGetFP',
 		'ceGetSP',
 		'ceCaptureCStackPointers',
+		'ceGetUdsp',
+		'ceResetUdsp',
+		'jitDomainUdspBase',
 		'fixedCodeCursor',
 		'savedMethodZoneBase',
 		'ordinarySendTrampolines',
@@ -456,6 +459,9 @@ Cogit class >> declareCVarsIn: aCCodeGenerator [
 	aCCodeGenerator
 		var: #ceGetFP declareC: 'usqIntptr_t (*ceGetFP)(void)';
 		var: #ceGetSP declareC: 'usqIntptr_t (*ceGetSP)(void)';
+		var: #ceGetUdsp declareC: 'usqIntptr_t (*ceGetUdsp)(void)';
+		var: #ceResetUdsp declareC: 'void (*ceResetUdsp)(void)';
+		var: #jitDomainUdspBase type: #usqIntptr_t;
 		var: #ceCaptureCStackPointers
 		declareC: 'void (*ceCaptureCStackPointers)(void)';
 		var: #ceEnterCogCodePopReceiverReg
@@ -1206,7 +1212,7 @@ Cogit class >> mustBeGlobalAndExport: var [
 		ceTryLockVMOwner ceUnlockVMOwner
 		'cmEntryOffset' 'cmNoCheckEntryOffset' 'cmDynSuperEntryOffset' 'cmSelfSendEntryOffset'
 		'missOffset' 'cbEntryOffset' 'cbNoSwitchEntryOffset' 'blockNoContextSwitchOffset'
-		CFramePointer CStackPointer 'cFramePointerInUse' ceGetFP ceGetSP
+		CFramePointer CStackPointer 'cFramePointerInUse' ceGetFP ceGetSP ceGetUdsp ceResetUdsp
 		traceFlags 'traceStores' debugPrimCallStackOffset)
 			includes: var
 
@@ -6644,6 +6650,8 @@ Cogit >> genEnilopmartFor: regArg1 and: regArg2OrNone and: regArg3OrNone forCall
 
 	backEnd hasVarBaseRegister ifTrue:
 		[self MoveCq: self varBaseAddress R: VarBaseReg]. "Must happen first; value may be used in genLoadStackPointers"
+	"Drop the Domain Return Stack records left by the exits that did not return"
+	self cppIf: JITDOMAIN ifTrue: [ self genResetUdspToBase: TempReg ].
 	backEnd genLoadStackPointers.
 	regArg3OrNone ~= NoReg ifTrue: [self PopR: regArg3OrNone].
 	regArg2OrNone ~= NoReg ifTrue: [self PopR: regArg2OrNone].
@@ -6819,6 +6827,31 @@ Cogit >> genInnerPICAbortTrampoline: name [
 		appendOpcodes: true
 ]
 
+{ #category : 'jitdomain' }
+Cogit >> genJitDomainUdspRoutines [
+
+	"Generate ceGetUdsp, which answers the Domain Return Stack pointer, and ceResetUdsp, which moves it
+	 back to the base. The VM calls them from C; only the VM domain may access udsp."
+
+	| startAddress |
+	<option: #JITDOMAIN>
+	<inline: false>
+	self allocateOpcodes: 8 bytecodes: 0.
+	startAddress := methodZoneBase.
+	backEnd genMoveUdspR: backEnd cResultRegister.
+	self RetN: 0.
+	self outputInstructionsForGeneratedRuntimeAt: startAddress.
+	self recordGeneratedRunTime: 'ceGetUdsp' address: startAddress.
+	ceGetUdsp := self cCoerceSimple: startAddress to: #'usqIntptr_t (*)(void)'.
+	startAddress := methodZoneBase.
+	self zeroOpcodeIndex.
+	self genResetUdspToBase: backEnd cResultRegister.
+	self RetN: 0.
+	self outputInstructionsForGeneratedRuntimeAt: startAddress.
+	self recordGeneratedRunTime: 'ceResetUdsp' address: startAddress.
+	ceResetUdsp := self cCoerceSimple: startAddress to: #'void (*)(void)'
+]
+
 { #category : 'trampoline support' }
 Cogit >> genLoadCStackPointersForPrimCall [
 	debugPrimCallStackOffset = 0
@@ -6951,6 +6984,15 @@ Cogit >> genPICAbortTrampoline [
 	backEnd hasLinkRegister ifTrue:
 		[self PushR: LinkReg].
 	^self genInnerPICAbortTrampoline: 'cePICAbort'
+]
+
+{ #category : 'jitdomain' }
+Cogit >> genResetUdspToBase: scratchReg [
+
+	<option: #JITDOMAIN>
+	self MoveAw: self jitDomainUdspBaseAddress R: scratchReg.
+	backEnd genMoveRUdsp: scratchReg.
+	^ 0
 ]
 
 { #category : 'initialization' }
@@ -7909,6 +7951,17 @@ Cogit >> getIsObjectReference [
 	^IsObjectReference
 ]
 
+{ #category : 'jitdomain' }
+Cogit >> getJitDomainUdspBase [
+
+	"The value the enilopmarts write into udsp: the Domain Return Stack pointer when the VM last
+	 entered an execution level (start-up or a callback)"
+
+	<api>
+	<returnTypeC: #usqIntptr_t>
+	^ jitDomainUdspBase
+]
+
 { #category : 'compile abstract instructions' }
 Cogit >> getLiteral: litIndex [
 	maxLitIndex < litIndex ifTrue:
@@ -8294,7 +8347,8 @@ Cogit >> initializeCodeZoneFrom: startAddress upTo: endAddress [
 	self enableCodeZoneWriteDuring: [
 		self maybeGenerateCheckFeatures.
 		self maybeGenerateICacheFlush.
-		self genGetLeafCallStackPointer ].
+		self genGetLeafCallStackPointer.
+		self cppIf: JITDOMAIN ifTrue: [ self genJitDomainUdspRoutines ] ].
 
 	self generateStackPointerCapture.
 	self generateTrampolines.
@@ -8547,6 +8601,19 @@ Cogit >> isTrampolineArgConstant: n [
 ]
 
 { #category : 'jitdomain' }
+Cogit >> jitDomainCaptureUdspBase [
+
+	"At the start of an execution level: from now on, enilopmarts drop the Domain Return Stack records
+	 pushed since, which the exits that never return leave behind"
+
+	<api>
+	<option: #JITDOMAIN>
+	jitDomainUdspBase := self
+		cCode: [ self ceGetUdsp ]
+		inSmalltalk: [ self simulateLeafCallOf: ceGetUdsp ]
+]
+
+{ #category : 'jitdomain' }
 Cogit >> jitDomainCode [
 
 	"The JIT domain (DOM1): machine code (methods, PICs, the stubs entered from the VM domain), which shares the
@@ -8589,6 +8656,27 @@ Cogit >> jitDomainPageSize [
 
 	<inline: true>
 	^ 4096
+]
+
+{ #category : 'jitdomain' }
+Cogit >> jitDomainResetUdsp [
+
+	"Drop the Domain Return Stack records above the base, at the longjmp back into the interpreter"
+
+	<api>
+	<option: #JITDOMAIN>
+	self
+		cCode: [ self ceResetUdsp ]
+		inSmalltalk: [ self simulateLeafCallOf: ceResetUdsp ]
+]
+
+{ #category : 'jitdomain' }
+Cogit >> jitDomainUdspBaseAddress [
+
+	<returnTypeC: #usqInt>
+	^ self
+		cCode: [ (self addressOf: jitDomainUdspBase) asUnsignedInteger ]
+		inSmalltalk: [ self simulatedReadWriteVariableAddress: #getJitDomainUdspBase in: self ]
 ]
 
 { #category : 'jitdomain' }
@@ -11426,10 +11514,19 @@ Cogit >> setInterpreter: aCoInterpreter [
 	trampolineAddresses := CArrayAccessor on:
 		                       (Array new: NumTrampolines * 4).
 	trampolineTableIndex := 0.
+	jitDomainUdspBase := 0.
 
 	extA := numExtB := extB := 0.
 
 	compilationTrace ifNil: [compilationTrace := self class initializationOptions at: #compilationTrace ifAbsent: [0]]
+]
+
+{ #category : 'jitdomain' }
+Cogit >> setJitDomainUdspBase: anAddress [
+
+	<api>
+	<var: #anAddress type: #usqIntptr_t>
+	jitDomainUdspBase := anAddress
 ]
 
 { #category : 'jit - api' }

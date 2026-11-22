@@ -1426,6 +1426,8 @@ StackToRegisterMappingCogit >> genCallPICEnilopmartNumArgs: numArgs [
 	self zeroOpcodeIndex.
 	backEnd hasVarBaseRegister ifTrue:
 		[self MoveCq: self varBaseAddress R: VarBaseReg]. "Must happen first; value may be used in genLoadStackPointers"
+	"Drop the Domain Return Stack records left by the exits that did not return"
+	self cppIf: JITDOMAIN ifTrue: [ self genResetUdspToBase: TempReg ].
 	backEnd genLoadStackPointers.
 	self PopR: ClassReg. "cacheTag"
 	self PopR: TempReg. "entry-point"

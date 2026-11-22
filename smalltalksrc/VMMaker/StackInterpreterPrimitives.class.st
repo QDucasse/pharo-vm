@@ -4023,6 +4023,7 @@ StackInterpreterPrimitives >> ptEnterInterpreterFromCallback: aPointer [
 	suspendedProcess := self supendActiveProcess.
 	self pushSameThreadCalloutSuspendedProcess: suspendedProcess. 
 	
+	self captureJitDomainUdspBase.
 	self enterSmalltalkExecutive.	
 	
 	"NEVER REACHED"

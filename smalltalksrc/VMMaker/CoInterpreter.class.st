@@ -924,6 +924,17 @@ CoInterpreter >> callRegisterArgCogMethod: cogMethod at: entryOffset receiver: r
 	self unreachable
 ]
 
+{ #category : 'callback support' }
+CoInterpreter >> captureJitDomainUdspBase [
+
+	"Entering an execution level (start-up or a callback): its enilopmarts reset the Domain Return Stack to
+	 where it is now, which keeps the records of the outer levels. A callback restores the outer level's
+	 base on its way out (see restoreCStackStateForCallbackContext:)."
+
+	<inline: true>
+	self cppIf: JITDOMAIN ifTrue: [ cogit jitDomainCaptureUdspBase ]
+]
+
 { #category : 'enilopmarts' }
 CoInterpreter >> ceActivateFailingPrimitiveMethod: aPrimitiveMethod [
 
@@ -2313,6 +2324,8 @@ CoInterpreter >> enterSmalltalkExecutiveImplementation [
 	cogit ceCaptureCStackPointers.
 	"Setjmp for reentry into interpreter from elsewhere, e.g. machine-code trampolines."
 	self sigset: reenterInterpreter jmp: 0.
+	"A longjmp lands here: drop the Domain Return Stack records of the exits it skipped"
+	self cppIf: JITDOMAIN ifTrue: [ cogit jitDomainResetUdsp ].
 	(self isMachineCodeFrame: framePointer) ifTrue: [
 		self returnToExecutive: false postContextSwitch: true.
 		self unreachable ].
@@ -4567,6 +4580,8 @@ CoInterpreter >> restoreCStackStateForCallbackContext: vmCallbackContext [
 	cogit
 		setCStackPointer: vmCallbackContext savedCStackPointer;
 		setCFramePointer: vmCallbackContext savedCFramePointer.
+	self cppIf: JITDOMAIN ifTrue: [
+		cogit setJitDomainUdspBase: vmCallbackContext savedJitDomainUdspBase ].
 
 	super restoreCStackStateForCallbackContext: vmCallbackContext
 ]
@@ -4728,6 +4743,8 @@ CoInterpreter >> saveCStackStateForCallbackContext: vmCallbackContext [
 	vmCallbackContext
 		savedCStackPointer: cogit getCStackPointer;
 		savedCFramePointer: cogit getCFramePointer.
+	self cppIf: JITDOMAIN ifTrue: [
+		vmCallbackContext savedJitDomainUdspBase: cogit getJitDomainUdspBase ].
 	super saveCStackStateForCallbackContext: vmCallbackContext
 ]
 

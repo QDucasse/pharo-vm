@@ -10,6 +10,8 @@ I test how machine code leaves for the VM under JITDOMAIN: each trampoline is a 
       ret
   Machine code calls the thunk, and every variable
   that records a trampoline records its thunk.
+- The enilopmarts reset the Domain Return Stack to the base the VM captured on entry, dropping the records of the
+  exits that never returned.
 "
 Class {
 	#name : 'VMRISCV64JITDomainExitTest',
@@ -102,7 +104,8 @@ VMRISCV64JITDomainExitTest >> setUp [
 	super setUp.
 	self hart
 		dspbase: self base;
-		dsp: self base
+		dsp: self base.
+	cogit setJitDomainUdspBase: self base
 ]
 
 { #category : 'helpers' }
@@ -131,6 +134,31 @@ VMRISCV64JITDomainExitTest >> targetOfThunk: thunk [
 	^ thunk
 		+ ((self signed: (self wordAt: thunk) >> 12 bits: 20) << 12)
 		+ (self signed: (self wordAt: thunk + 4) >> 20 bits: 12)
+]
+
+{ #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testCapturedBaseIsTheDomainReturnStackPointer [
+
+	cogit genJitDomainUdspRoutines.
+	self hart dsp: self base - 32.
+	cogit jitDomainCaptureUdspBase.
+	self assert: cogit getJitDomainUdspBase equals: self base - 32.
+
+	self hart dsp: self base - 56.
+	cogit jitDomainResetUdsp.
+	self assert: self hart dsp equals: self base - 32
+]
+
+{ #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testEnilopmartsResetTheDomainReturnStack [
+
+	"Enilopmarts start by dropping the records left above the base"
+
+	| startToEnd |
+	startToEnd := self compileWithEnd: [ cogit genResetUdspToBase: TempReg ].
+	self hart dsp: self base - 24.
+	self runFromTo: startToEnd.
+	self assert: self hart dsp equals: self base
 ]
 
 { #category : 'tests' }
@@ -268,6 +296,14 @@ VMRISCV64JITDomainExitTest >> testThunksCallTheirGatesAtTheirPads [
 				self assert: (self wordAt: addresses first) equals: pad.
 				checked := checked + 1 ] ].
 	self assert: checked > 40
+]
+
+{ #category : 'helpers' }
+VMRISCV64JITDomainExitTest >> compileWithEnd: aBlock [
+
+	| start end |
+	start := self compile: [ aBlock value. end := cogit Label ] bytecodes: 10.
+	^ start -> end address
 ]
 
 { #category : 'helpers' }

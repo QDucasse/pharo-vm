@@ -11,7 +11,8 @@ Class {
 		'rvs',
 		'savedPrimFunctionPointer',
 		'trampoline',
-		'savedReenterInterpreter'
+		'savedReenterInterpreter',
+		'savedJitDomainUdspBase'
 	],
 	#category : 'VMMaker-Support',
 	#package : 'VMMaker',
@@ -40,7 +41,8 @@ VMCallbackContext class >> instVarNamesAndTypesForTranslationDo: aBinaryBlock [
 								struct { void *addr; sqIntptr_t size; } valstruct;
 							}'].
 						['trampoline']				-> [#'jmp_buf'].
-						['savedReenterInterpreter']	-> [#'jmp_buf']}
+						['savedReenterInterpreter']	-> [#'jmp_buf'].
+						['savedJitDomainUdspBase']	-> [#usqIntptr_t]}
 						otherwise: [#'void *'])]
 ]
 
@@ -138,6 +140,18 @@ VMCallbackContext >> savedCStackPointer: anObject [
 	"Set the value of savedCStackPointer"
 
 	^savedCStackPointer := anObject
+]
+
+{ #category : 'accessing' }
+VMCallbackContext >> savedJitDomainUdspBase [
+
+	^ savedJitDomainUdspBase
+]
+
+{ #category : 'accessing' }
+VMCallbackContext >> savedJitDomainUdspBase: anAddress [
+
+	^ savedJitDomainUdspBase := anAddress
 ]
 
 { #category : 'accessing' }
