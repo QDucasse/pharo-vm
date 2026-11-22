@@ -199,10 +199,12 @@ JITDomainHartState >> initialize [
 	dspbase := 0.
 	drs := Dictionary new.
 	events := OrderedCollection new.
-	"dgate as Cog configures it: the VM domain (0) and the JIT domain (1) may call each other, nothing else"
+	"dgate as Cog configures it: the VM domain (0) and the JIT domain (1) may call each other, and the VM
+	 domain itself (machine code still runs there when it exits through a gate), nothing else"
 	gates := (1 to: 8) collect: [ :i | Set new ].
 	self allowCallsFrom: 0 to: 1.
-	self allowCallsFrom: 1 to: 0
+	self allowCallsFrom: 1 to: 0.
+	self allowCallsFrom: 0 to: 0
 ]
 
 { #category : 'emulation' }

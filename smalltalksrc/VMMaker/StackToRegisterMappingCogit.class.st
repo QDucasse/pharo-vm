@@ -1994,7 +1994,7 @@ StackToRegisterMappingCogit >> genMethodAbortTrampolineFor: numArgs [
 	 receiver must always contain an object (and hence be non-zero) on SIC miss."
 	| jumpSICMiss |
 	<var: #jumpSICMiss type: #'AbstractInstruction *'>
-	self zeroOpcodeIndex.
+	self zeroOpcodeIndexForGate.
 	self CmpCq: 0 R: ReceiverResultReg.
 	jumpSICMiss := self JumpNonZero: 0.
 
@@ -2038,7 +2038,7 @@ StackToRegisterMappingCogit >> genPICAbortTrampolineFor: numArgs [
 	 target or a call of ceMNUFromPICMNUMethod:receiver: to handle an
 	 MNU dispatch in a closed PIC.  It distinguishes the two by testing
 	 ClassReg.  If the register is zero then this is an MNU."
-	self zeroOpcodeIndex. 
+	self zeroOpcodeIndexForGate.
 	backEnd genPushRegisterArgsForAbortMissNumArgs: numArgs.
 	^self genInnerPICAbortTrampoline: (self trampolineName: 'cePICAbort' numRegArgs: numArgs)
 ]
@@ -2048,10 +2048,10 @@ StackToRegisterMappingCogit >> genPICMissTrampolineFor: numArgs [
 	<inline: false>
 	| startAddress |
 	startAddress := methodZoneBase.
-	self zeroOpcodeIndex.
+	self zeroOpcodeIndexForGate.
 	"N.B. a closed PIC jumps to the miss routine, not calls it, so there is only one retpc on the stack."
 	backEnd genPushRegisterArgsForNumArgs: numArgs scratchReg: SendNumArgsReg.
-	self genTrampolineFor: #cePICMiss:receiver:
+	^self genTrampolineFor: #cePICMiss:receiver:
 		called: (self trampolineName: 'cePICMiss' numRegArgs: numArgs)
 		numArgs: 2
 		arg: ClassReg
@@ -2061,8 +2061,7 @@ StackToRegisterMappingCogit >> genPICMissTrampolineFor: numArgs [
 		regsToSave: self emptyRegisterMask
 		pushLinkReg: true
 		resultReg: NoReg
-		appendOpcodes: true.
-	^startAddress
+		appendOpcodes: true
 ]
 
 { #category : 'bytecode generators' }
@@ -2468,13 +2467,13 @@ StackToRegisterMappingCogit >> genSendTrampolineFor: aRoutine numArgs: numArgs c
 	| startAddress |
 	<inline: false>
 	startAddress := methodZoneBase.
-	self zeroOpcodeIndex.
+	self zeroOpcodeIndexForGate.
 	backEnd genPushRegisterArgsForNumArgs: numArgs scratchReg: SendNumArgsReg.
 	objectRepresentation selectorIndexDereferenceRoutine ifNotNil: [:routine| 
 		backEnd hasLinkRegister ifTrue: [self PushR: LinkReg].
 		self Call: routine.
 		backEnd hasLinkRegister ifTrue: [self PopR: LinkReg]. ].
-	self genTrampolineFor: aRoutine
+	^self genTrampolineFor: aRoutine
 		called: aString
 		numArgs: 4
 		arg: regOrConst0
@@ -2484,8 +2483,7 @@ StackToRegisterMappingCogit >> genSendTrampolineFor: aRoutine numArgs: numArgs c
 		regsToSave: self emptyRegisterMask
 		pushLinkReg: true
 		resultReg: NoReg
-		appendOpcodes: true.
-	^startAddress
+		appendOpcodes: true
 ]
 
 { #category : 'bytecode generators' }

@@ -204,6 +204,8 @@ Class {
 		'ceGetFP',
 		'ceGetSP',
 		'ceCaptureCStackPointers',
+		'fixedCodeCursor',
+		'savedMethodZoneBase',
 		'ordinarySendTrampolines',
 		'superSendTrampolines',
 		'directedSuperSendTrampolines',
@@ -4222,6 +4224,17 @@ Cogit >> cleanUpFailingCogCodeConstituents: cogMethodArg [
 	^nil
 ]
 
+{ #category : 'jitdomain' }
+Cogit >> closeJitDomainGateArea [
+
+	"The gates are generated: what follows goes after the fixed code area"
+
+	<option: #JITDOMAIN>
+	methodZoneBase > self jitDomainFixedCodeStart ifTrue:
+		[self error: 'JITDomain: the gate area is too small'].
+	methodZoneBase := fixedCodeCursor
+]
+
 { #category : 'accessing' }
 Cogit >> coInterpreter [
 	<doNotGenerate>
@@ -5329,8 +5342,8 @@ Cogit >> compileTrampolineFor: aRoutine numArgs: numArgs arg: regOrConst0 arg: r
 			[backEnd hasPCRegister
 				ifTrue: [self PopR: PCReg]
 				ifFalse: [self PopR: LinkReg. 
-						self RetN: 0]]
-		ifFalse: [self RetN: 0]
+						self genGateReturn]]
+		ifFalse: [self genGateReturn]
 ]
 
 { #category : 'initialization' }
@@ -5357,8 +5370,8 @@ Cogit >> compileTrampolineFor: aRoutine numArgs: numArgs arg: regOrConst0 arg: r
 			[backEnd hasPCRegister
 				ifTrue: [self PopR: PCReg]
 				ifFalse: [self PopR: LinkReg. 
-						self RetN: 0]]
-		ifFalse: [self RetN: 0]
+						self genGateReturn]]
+		ifFalse: [self genGateReturn]
 ]
 
 { #category : 'initialization' }
@@ -5386,8 +5399,8 @@ Cogit >> compileTrampolineFor: aRoutine numArgs: numArgs arg: regOrConst0 arg: r
 			[backEnd hasPCRegister
 				ifTrue: [self PopR: PCReg]
 				ifFalse: [self PopR: LinkReg. 
-						self RetN: 0]]
-		ifFalse: [self RetN: 0]
+						self genGateReturn]]
+		ifFalse: [self genGateReturn]
 ]
 
 { #category : 'initialization' }
@@ -5750,6 +5763,17 @@ Cogit >> enterCogCodePopReceiver [
 		inSmalltalk: [self ceEnterCogCodePopReceiverReg].
 	"(and this exists only to reference Debug)"
 	Debug ifFalse: [self error: 'what??']
+]
+
+{ #category : 'jitdomain' }
+Cogit >> enterFixedCodeArea [
+
+	"Generate the next routines in the fixed code area, the machine code below the method zone (see
+	 generateTrampolines), until leaveFixedCodeArea"
+
+	self cppIf: JITDOMAIN ifTrue: [
+		savedMethodZoneBase := methodZoneBase.
+		methodZoneBase := fixedCodeCursor ]
 ]
 
 { #category : 'in-line cacheing' }
@@ -6158,6 +6182,13 @@ Cogit >> firstPrototypeMethodOop [
 		ifFalse: [16r5EAF00D]
 ]
 
+{ #category : 'jitdomain' }
+Cogit >> fixedCodeCursor [
+
+	<doNotGenerate>
+	^ fixedCodeCursor
+]
+
 { #category : 'compile abstract instructions' }
 Cogit >> fixupAt: fixupPC [
 	<inline: true>
@@ -6340,6 +6371,39 @@ Cogit >> freeUnmarkedMachineCode [
 	flushingCacheWith: [  	
 		codeModified ifTrue: "After possibly updating inline caches we need to flush the icache."
 			[self flushICacheFrom: methodZoneBase asUnsignedInteger to: methodZone limitZony asUnsignedInteger]]
+]
+
+{ #category : 'jitdomain' }
+Cogit >> gateEntryFor: gateAddress called: trampolineName [
+
+	"Answer the address machine code calls to reach a trampoline: with JITDOMAIN, the trampoline is a
+	 gate and machine code calls its thunk"
+
+	<var: #trampolineName type: #'char *'>
+	self cppIf: JITDOMAIN ifTrue: [ ^ self genThunkFor: gateAddress called: trampolineName ].
+	^ gateAddress
+]
+
+{ #category : 'jitdomain' }
+Cogit >> genThunkFor: gateAddress called: trampolineName [
+
+	"Generate the thunk of a gate in the fixed code area and answer its address:
+		auipc/addi x5, gate; domcall x0, x5, DOM0, LBL_GATE; ret
+	 domcall leaves the link register alone, so the gate sees the return address of the call site, as
+	 the trampoline did. Every table and variable that records the trampoline records the thunk."
+
+	<var: #trampolineName type: #'char *'>
+	<option: #JITDOMAIN>
+	| thunk |
+	self enterFixedCodeArea.
+	thunk := methodZoneBase.
+	self zeroOpcodeIndex.
+	backEnd genDomainCallTo: gateAddress domain: self jitDomainVM label: self jitDomainGateLabel.
+	self RetN: 0.
+	self outputInstructionsForGeneratedRuntimeAt: thunk.
+	self recordGeneratedRunTime: trampolineName address: thunk.
+	self leaveFixedCodeArea.
+	^ thunk
 ]
 
 { #category : 'compile abstract instructions' }
@@ -6530,7 +6594,7 @@ Cogit >> genCallMustBeBooleanFor: boolean [
 
 { #category : 'initialization' }
 Cogit >> genCheckForInterruptsTrampoline [
-	self zeroOpcodeIndex.
+	self zeroOpcodeIndexForGate.
 	"if we have a link register we will assume that it does not get automatically pushed onto the stack
 	and thus there is no need to pop it before saving to instructionPointerAddress"
 	backEnd hasLinkRegister
@@ -6671,6 +6735,24 @@ Cogit >> genExternalizePointersForPrimitiveCall [
 	^0
 ]
 
+{ #category : 'jitdomain' }
+Cogit >> genGatePad [
+
+	<option: #JITDOMAIN>
+	^ backEnd genDomainLandingPad: self jitDomainVM label: self jitDomainGateLabel
+]
+
+{ #category : 'jitdomain' }
+Cogit >> genGateReturn [
+
+	"A gate returns to its thunk, which returns to machine code"
+
+	self cppIf: JITDOMAIN
+		ifTrue: [ backEnd genDomainReturn ]
+		ifFalse: [ self RetN: 0 ].
+	^ 0
+]
+
 { #category : 'initialization' }
 Cogit >> genGetLeafCallStackPointer [
 	"Generate a routine that answers the stack pointer immedately
@@ -6802,7 +6884,7 @@ Cogit >> genMethodAbortTrampoline [
 	 receiver must always contain an object (and hence be non-zero) on SIC miss."
 	| jumpSICMiss |
 	<var: #jumpSICMiss type: #'AbstractInstruction *'>
-	self zeroOpcodeIndex.
+	self zeroOpcodeIndexForGate.
 	self CmpCq: 0 R: ReceiverResultReg.
 	jumpSICMiss := self JumpNonZero: 0.
 
@@ -6835,7 +6917,7 @@ Cogit >> genMethodAbortTrampoline [
 
 { #category : 'initialization' }
 Cogit >> genNonLocalReturnTrampoline [
-	self zeroOpcodeIndex.
+	self zeroOpcodeIndexForGate.
 	"write the return address to the coInterpreter instructionPointerAddress;
 	 following the CallRT to this CISCs will have pushed it on the stack, so pop it first; RISCs will have it in
 	 their link register so just write it directly."
@@ -6865,7 +6947,7 @@ Cogit >> genPICAbortTrampoline [
 	 target or a call of ceMNUFromPICMNUMethod:receiver: to handle an
 	 MNU dispatch in a closed PIC.  It distinguishes the two by testing
 	 ClassReg.  If the register is zero then this is an MNU."
-	self zeroOpcodeIndex.
+	self zeroOpcodeIndexForGate.
 	backEnd hasLinkRegister ifTrue:
 		[self PushR: LinkReg].
 	^self genInnerPICAbortTrampoline: 'cePICAbort'
@@ -7175,7 +7257,7 @@ Cogit >> genTrampolineFor: aRoutine called: trampolineName numArgs: numArgs arg:
 	<inline: false>
 	startAddress := methodZoneBase.
 	appendBoolean ifFalse:
-		[self zeroOpcodeIndex].
+		[self zeroOpcodeIndexForGate].
 	self compileTrampolineFor: aRoutine
 		numArgs: numArgs
 		arg: regOrConst0
@@ -7188,7 +7270,7 @@ Cogit >> genTrampolineFor: aRoutine called: trampolineName numArgs: numArgs arg:
 	self outputInstructionsForGeneratedRuntimeAt: startAddress.
 	self recordGeneratedRunTime: trampolineName address: startAddress.
 	self recordRunTimeObjectReferences.
-	^startAddress
+	^self gateEntryFor: startAddress called: trampolineName
 ]
 
 { #category : 'initialization' }
@@ -7203,7 +7285,7 @@ Cogit >> genTrampolineFor: aRoutine called: trampolineName numArgs: numArgs arg:
 	<inline: false>
 	startAddress := methodZoneBase.
 	appendBoolean ifFalse:
-		[self zeroOpcodeIndex].
+		[self zeroOpcodeIndexForGate].
 	self compileTrampolineFor: aRoutine
 		numArgs: numArgs
 		arg: regOrConst0
@@ -7216,7 +7298,7 @@ Cogit >> genTrampolineFor: aRoutine called: trampolineName numArgs: numArgs arg:
 	self outputInstructionsForGeneratedRuntimeAt: startAddress.
 	self recordGeneratedRunTime: trampolineName address: startAddress.
 	self recordRunTimeObjectReferences.
-	^startAddress
+	^self gateEntryFor: startAddress called: trampolineName
 ]
 
 { #category : 'initialization' }
@@ -7231,7 +7313,7 @@ Cogit >> genTrampolineFor: aRoutine called: trampolineName numArgs: numArgs arg:
 	<inline: false>
 	startAddress := methodZoneBase.
 	appendBoolean ifFalse:
-		[self zeroOpcodeIndex].
+		[self zeroOpcodeIndexForGate].
 	self compileTrampolineFor: aRoutine
 		numArgs: numArgs
 		arg: regOrConst0
@@ -7245,7 +7327,7 @@ Cogit >> genTrampolineFor: aRoutine called: trampolineName numArgs: numArgs arg:
 	self outputInstructionsForGeneratedRuntimeAt: startAddress.
 	self recordGeneratedRunTime: trampolineName address: startAddress.
 	self recordRunTimeObjectReferences.
-	^startAddress
+	^self gateEntryFor: startAddress called: trampolineName
 ]
 
 { #category : 'initialization' }
@@ -7737,13 +7819,18 @@ Cogit >> generateStackPointerCapture [
 { #category : 'initialization' }
 Cogit >> generateTrampolines [
 	"Generate the run-time entries and exits at the base of the native code zone and update the base.
-	 Read the class-side method trampolines for documentation on the various trampolines"
+	 Read the class-side method trampolines for documentation on the various trampolines.
+	 With JITDOMAIN, the routines the VM executes (gates, enilopmarts, routines called from C) stay at
+	 the base, in the gate area. Machine code that is never moved (the gates' thunks, the helpers that
+	 do not leave machine code) goes in the fixed code area, from the next page boundary after the gate
+	 area to the method zone. See jitDomainFixedCodeStart."
 	| methodZoneStart |
 	
 	methodZoneStart := methodZoneBase.
 	methodLabel address: methodZoneStart.
 	self allocateOpcodes: 80 bytecodes: 0.
 	hasYoungReferent := false.
+	self cppIf: JITDOMAIN ifTrue: [ self openJitDomainFixedCodeArea ].
 	
 	self 
 		enableCodeZoneWriteDuring: [ 	
@@ -7755,6 +7842,7 @@ Cogit >> generateTrampolines [
 			SistaVM ifTrue: [self generateSistaRuntime].
 			self generateEnilopmarts.
 			self generateTracingTrampolines.
+			self cppIf: JITDOMAIN ifTrue: [ self closeJitDomainGateArea ].
 			self recordGeneratedRunTime: 'methodZoneBase' address: methodZoneBase]
 		flushingCacheWith: [ self flushICacheFrom: methodZoneStart asUnsignedInteger to: methodZoneBase asUnsignedInteger ].
 
@@ -8468,6 +8556,50 @@ Cogit >> jitDomainCode [
 	^ 1
 ]
 
+{ #category : 'jitdomain' }
+Cogit >> jitDomainFixedCodeStart [
+
+	"The start of the fixed code area: the first page boundary after the gate area"
+
+	<option: #JITDOMAIN>
+	^ codeBase + self jitDomainGateAreaSize + self jitDomainPageSize - 1 bitClear: self jitDomainPageSize - 1
+]
+
+{ #category : 'jitdomain' }
+Cogit >> jitDomainGateAreaSize [
+
+	"The bytes reserved at the start of the code zone for the routines the VM executes: the gates, the
+	 enilopmarts and the routines called from C. Machine code cannot execute them."
+
+	<inline: true>
+	^ 16 * 1024
+]
+
+{ #category : 'jitdomain' }
+Cogit >> jitDomainGateLabel [
+
+	"The label of the gates' landing pads: machine code enters the VM domain only through a thunk's domcall with it"
+
+	<inline: true>
+	^ 1
+]
+
+{ #category : 'jitdomain' }
+Cogit >> jitDomainPageSize [
+
+	<inline: true>
+	^ 4096
+]
+
+{ #category : 'jitdomain' }
+Cogit >> jitDomainVM [
+
+	"The VM domain (DOM0): the VM in C, the gates and the enilopmarts"
+
+	<inline: true>
+	^ 0
+]
+
 { #category : 'disassembly' }
 Cogit >> labelForPC: address [
 	<doNotGenerate>
@@ -8507,6 +8639,16 @@ Cogit >> latestContinuationPCFor: descriptor at: pc exts: nExts in: aMethodObj [
 	| distance |
 	distance := self spanFor: descriptor at: pc exts: nExts in: aMethodObj.
 	^pc + descriptor numBytes + (distance max: 0)
+]
+
+{ #category : 'jitdomain' }
+Cogit >> leaveFixedCodeArea [
+
+	"methodLabel is for addressIsInCurrentCompilation:, and the enilopmarts do not set it"
+	self cppIf: JITDOMAIN ifTrue: [
+		fixedCodeCursor := methodZoneBase.
+		methodZoneBase := savedMethodZoneBase.
+		methodLabel address: methodZoneBase ]
 ]
 
 { #category : 'in-line cacheing' }
@@ -9901,6 +10043,15 @@ Cogit >> offsetAndSendTableFor: entryPoint annotation: annotation into: binaryBl
 	binaryBlock
 		value: offset
 		value: sendTable
+]
+
+{ #category : 'jitdomain' }
+Cogit >> openJitDomainFixedCodeArea [
+
+	"Gates generated from now on put their thunks at the start of the fixed code area"
+
+	<option: #JITDOMAIN>
+	fixedCodeCursor := self jitDomainFixedCodeStart
 ]
 
 { #category : 'accessing' }
@@ -12060,6 +12211,15 @@ Cogit >> zeroOpcodeIndex [
 	0 to: opcodeIndex - 1 do:
 		[:i| (abstractOpcodes at: i) dependent: nil].
 	self zeroOpcodeIndexForNewOpcodes
+]
+
+{ #category : 'jitdomain' }
+Cogit >> zeroOpcodeIndexForGate [
+
+	"Start a trampoline. With JITDOMAIN it is a gate, whose first instruction is its landing pad"
+
+	self zeroOpcodeIndex.
+	self cppIf: JITDOMAIN ifTrue: [ self genGatePad ]
 ]
 
 { #category : 'accessing' }

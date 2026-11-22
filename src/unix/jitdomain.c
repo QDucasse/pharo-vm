@@ -5,7 +5,8 @@
  * VM code runs in domain 0, generated code in domain 1. For now both have
  * every right on every key, so the domain transitions in generated code are
  * checked (pads, labels, gates, the domain return stack) but no access is
- * restricted yet.
+ * restricted yet. Generated code still runs in domain 0 until the VM enters
+ * it with domain calls, so its exits are domain calls from 0 to 0.
  */
 
 #include <errno.h>
@@ -69,7 +70,8 @@ jitdomainEnable(void)
 	}
 	for (unsigned d = 0; d < JD_NDOMS; d++)
 		m.dtarget |= (uint64_t)d << (3 * d);
-	m.dgate = 1ULL << (8 * JD_DOM_VM + JD_DOM_JIT) | 1ULL << (8 * JD_DOM_JIT + JD_DOM_VM);
+	m.dgate = 1ULL << (8 * JD_DOM_VM + JD_DOM_JIT) | 1ULL << (8 * JD_DOM_JIT + JD_DOM_VM)
+		| 1ULL << (8 * JD_DOM_VM + JD_DOM_VM);
 
 	if (jdPrctl(PR_JITDOMAIN_SET_MATRICES, (unsigned long)&m)) {
 		logError("JITDomain: PR_JITDOMAIN_SET_MATRICES failed (%s)", strerror(errno));

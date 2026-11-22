@@ -2640,11 +2640,11 @@ CogObjectRepresentationForSpur >> genStoreCheckTrampoline [
 	<var: #jumpSC type: #'AbstractInstruction *'>
 	<inline: true>
 	CheckRememberedInTrampoline ifTrue:
-		[cogit zeroOpcodeIndex.
+		[cogit zeroOpcodeIndexForGate.
 		 jumpSC := self genCheckRememberedBitOf: ReceiverResultReg scratch: cogit backEnd cResultRegister.
 		 self assert: jumpSC opcode = JumpNonZero.
 		 jumpSC opcode: JumpZero.
-		 cogit RetN: 0.
+		 cogit genGateReturn.
 		 jumpSC jmpTarget: cogit Label].
 	^cogit
 		genTrampolineFor: #rememberObjInCorrectRememberedSet:
@@ -2725,7 +2725,7 @@ CogObjectRepresentationForSpur >> genStoreTrampolineCalled: trampolineName instV
 	<var: #jumpSC type: #'AbstractInstruction *'>
 	<var: #jumpRC type: #'AbstractInstruction *'>
 	<inline: false>
-	cogit zeroOpcodeIndex.
+	cogit zeroOpcodeIndexForGate.
 	"SendNumArgsReg is mutated but we don't care as register are not live across the trampoline.
 	 There is no reason why registers cannot be saved over the rememberObjInCorrectRememberedSet: call, but since the
 	 immutability check is a suspension point, registers cannot remain live."
@@ -2751,12 +2751,12 @@ CogObjectRepresentationForSpur >> genStoreTrampolineCalled: trampolineName instV
 			ifTrue:
 				[cogit TstCq: 1 << objectMemory rememberedBitShift R: SendNumArgsReg.
 				 jumpRC := cogit JumpZero: 0.
-				 cogit RetN: 0]
+				 cogit genGateReturn]
 			ifFalse:
 				[jumpRC := self genCheckRememberedBitOf: ReceiverResultReg scratch: SendNumArgsReg.
 				 self assert: jumpRC opcode = JumpNonZero.
 				 jumpRC opcode: JumpZero.
-				 cogit RetN: 0].
+				 cogit genGateReturn].
 		 jumpRC jmpTarget: cogit Label].
 	^ cogit genTrampolineFor: #rememberObjInCorrectRememberedSet:
 		called: trampolineName
@@ -2971,15 +2971,19 @@ CogObjectRepresentationForSpur >> generateObjectRepresentationTrampolines [
 	ceNewHashTrampoline := self genNewHashTrampoline: false called: 'ceNewHash'.
 	SistaVM ifTrue: [ceInlineNewHashTrampoline := self genNewHashTrampoline: true  called: 'ceInlineNewHash'].
 	ceStoreCheckTrampoline := self genStoreCheckTrampoline.
-	ceStoreCheckContextReceiverTrampoline := self genStoreCheckContextReceiverTrampoline.
 	ceScheduleScavengeTrampoline := cogit
 											genTrampolineFor: #ceScheduleScavenge
 											called: 'ceScheduleScavengeTrampoline'
 											regsToSave: CallerSavedRegisterMask.
+	"Machine code calls these without leaving its domain: they reach the run-time only through the
+	 store check and scavenge trampolines"
+	cogit enterFixedCodeArea.
+	ceStoreCheckContextReceiverTrampoline := self genStoreCheckContextReceiverTrampoline.
 	ceSmallActiveContextInMethodTrampoline := self genActiveContextTrampolineLarge: false inBlock: 0 called: 'ceSmallMethodContext'.
 	ceSmallActiveContextInFullBlockTrampoline := self genActiveContextTrampolineLarge: false inBlock: InFullBlock called: 'ceSmallFullBlockContext'.
 	ceLargeActiveContextInMethodTrampoline := self genActiveContextTrampolineLarge: true inBlock: 0 called: 'ceLargeMethodContext'.
 	ceLargeActiveContextInFullBlockTrampoline := self genActiveContextTrampolineLarge: true inBlock: InFullBlock called: 'ceLargeFullBlockContext'.
+	cogit leaveFixedCodeArea
 ]
 
 { #category : 'bytecode generator support' }

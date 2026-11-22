@@ -462,7 +462,11 @@ VMSimpleStackBasedCogitAbstractTest >> getLastAddress [
 
 { #category : 'running' }
 VMSimpleStackBasedCogitAbstractTest >> initialCodeSize [
-	^ 4 * 1024
+
+	"With JITDOMAIN, the thunks of the trampolines go after a 16 KB gate area"
+	^ self jitDomain
+		ifTrue: [ 64 * 1024 ]
+		ifFalse: [ 4 * 1024 ]
 ]
 
 { #category : 'running' }
@@ -833,6 +837,7 @@ VMSimpleStackBasedCogitAbstractTest >> setUp [
 	cogit methodZoneBase: cogInitialAddress.
 	cogit minCallAddress: cogInitialAddress.
 	cogit cogCodeBase: cogInitialAddress.
+	self jitDomain ifTrue: [ cogit openJitDomainFixedCodeArea ].
 	memory coInterpreter cogCodeSize: self initialCodeSize.
 	cogit initializeProcessor.
 	
