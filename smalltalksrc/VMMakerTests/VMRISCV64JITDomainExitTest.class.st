@@ -44,7 +44,7 @@ VMRISCV64JITDomainExitTest >> addressesNamed: aString [
 { #category : 'helpers' }
 VMRISCV64JITDomainExitTest >> base [
 
-	^ 16r10000
+	^ self domainReturnStackBase
 ]
 
 { #category : 'helpers' }
@@ -107,16 +107,6 @@ VMRISCV64JITDomainExitTest >> jitCompilerClass [
 VMRISCV64JITDomainExitTest >> runFromTo: startToEnd [
 
 	machineSimulator startAt: startToEnd key until: startToEnd value timeout: 0 count: 1000
-]
-
-{ #category : 'running' }
-VMRISCV64JITDomainExitTest >> setUp [
-
-	super setUp.
-	self hart
-		dspbase: self base;
-		dsp: self base.
-	cogit setJitDomainUdspBase: self base
 ]
 
 { #category : 'helpers' }
@@ -230,7 +220,8 @@ VMRISCV64JITDomainExitTest >> testRunTimeLayout [
 	self assert: (cogit fixedCodeCursor) equals: cogit methodZoneBase.
 
 	#( 'ceSend0Args' 'ceSuperSendNArgs' 'ceMethodAbort1Args' 'cePICAbort2Args' 'cePICMissNArgs' 'ceStoreCheckTrampoline'
-	   'ceCheckForInterruptsTrampoline' 'ceReturnToInterpreterTrampoline' 'ceBaseFrameReturnTrampoline' ) do: [ :name |
+	   'ceCheckForInterruptsTrampoline' 'ceReturnToInterpreterTrampoline' 'ceBaseFrameReturnTrampoline'
+	   'ceCheckProfileTickTrampoline' 'ceMcprimHashMultiplyTrampoline' ) do: [ :name |
 		| addresses |
 		addresses := self addressesNamed: name.
 		self assert: addresses size equals: 2.

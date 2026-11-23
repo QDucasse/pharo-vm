@@ -417,6 +417,14 @@ VMSimpleStackBasedCogitAbstractTest >> disassembleFrom: anIndex opcodes: numberO
 		pc: 0
 ]
 
+{ #category : 'running' }
+VMSimpleStackBasedCogitAbstractTest >> domainReturnStackBase [
+
+	"The top of the simulated Domain Return Stack. The simulator keeps the records itself, so no memory is mapped there."
+
+	^ 16r10000
+]
+
 { #category : 'helpers - registers' }
 VMSimpleStackBasedCogitAbstractTest >> framePointerRegisterValue [
 
@@ -524,6 +532,17 @@ VMSimpleStackBasedCogitAbstractTest >> jitDomain [
 VMSimpleStackBasedCogitAbstractTest >> jitDomain: aBoolean [
 
 	jitDomain := aBoolean
+]
+
+{ #category : 'running' }
+VMSimpleStackBasedCogitAbstractTest >> jitDomainReservedCodeSize [
+
+	"With JITDOMAIN the method zone starts after the 16 KB gate area and the fixed code area that follows it
+	 on the next page"
+
+	^ self jitDomain
+		ifTrue: [ 20 * 1024 ]
+		ifFalse: [ 0 ]
 ]
 
 { #category : 'helpers' }
@@ -852,7 +871,8 @@ VMSimpleStackBasedCogitAbstractTest >> setUp [
 
 	self initializeOldSpaceForScavenger.
 	self initializeStackMemory.
-	self initializeInitialStackFrame.	
+	self initializeInitialStackFrame.
+	self jitDomain ifTrue: [ self setUpDomainReturnStack ]
 ]
 
 { #category : 'running' }
@@ -860,6 +880,7 @@ VMSimpleStackBasedCogitAbstractTest >> setUpCogMethodEntry [
 	
 	cogit allocateOpcodes: 80 bytecodes: 0 ifFail: [ self error: 'Could not allocate opcodes' ].
 	cogit generateEnilopmarts.
+	self jitDomain ifTrue: [ cogit generateJitDomainPrimitiveGates ].
 	cogit maybeGenerateCheckFeatures.
 			
 	self setUpTrampolines.
@@ -870,6 +891,18 @@ VMSimpleStackBasedCogitAbstractTest >> setUpCogMethodEntry [
 	cogit computeEntryOffsets.
 	
 	cogit methodZone manageFrom: cogit methodZoneBase to: memory getMemoryMap codeZoneEnd.
+]
+
+{ #category : 'running' }
+VMSimpleStackBasedCogitAbstractTest >> setUpDomainReturnStack [
+
+	"Give the hart an empty Domain Return Stack, and make it the base the enilopmarts reset udsp to, as the VM
+	 does at start-up"
+
+	machineSimulator jitDomain
+		dspbase: self domainReturnStackBase;
+		dsp: self domainReturnStackBase.
+	cogit setJitDomainUdspBase: self domainReturnStackBase
 ]
 
 { #category : 'running' }

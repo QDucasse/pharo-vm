@@ -102,7 +102,7 @@ VMJitMethodTest >> filter: aGlyphForm [
 { #category : 'running' }
 VMJitMethodTest >> initialCodeSize [
 
-	^ 16 * 1024
+	^ 16 * 1024 + self jitDomainReservedCodeSize
 ]
 
 { #category : 'running' }

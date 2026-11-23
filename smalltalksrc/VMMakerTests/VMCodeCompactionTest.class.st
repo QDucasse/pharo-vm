@@ -66,7 +66,19 @@ VMCodeCompactionTest >> fillCodeZone [
 { #category : 'running' }
 VMCodeCompactionTest >> initialCodeSize [
 
-	^ 16 * 1024
+	^ 16 * 1024 + self jitDomainReservedCodeSize
+]
+
+{ #category : 'running' }
+VMCodeCompactionTest >> setUpCogMethodEntry [
+
+	super setUpCogMethodEntry.
+	"These tests fill the method zone: with JITDOMAIN, start it after the thunks in the fixed code area, as
+	 closeJitDomainGateArea does, so that methods do not overwrite them"
+	self jitDomain ifTrue: [
+		cogit methodZoneBase: cogit fixedCodeCursor.
+		cogInitialAddress := cogit methodZoneBase.
+		cogit methodZone manageFrom: cogit methodZoneBase to: memory getMemoryMap codeZoneEnd ]
 ]
 
 { #category : 'tests' }

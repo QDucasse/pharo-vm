@@ -6,6 +6,8 @@ Class {
 	#superclass : 'Cogit',
 	#instVars : [
 		'primitiveGeneratorTable',
+		'ceCheckProfileTickTrampoline',
+		'ceMcprimHashMultiplyTrampoline',
 		'primSetFunctionLabel',
 		'primInvokeInstruction',
 		'externalPrimCallOffsets',
@@ -261,6 +263,15 @@ SimpleStackBasedCogit >> bytecodeFixupClass [
 SimpleStackBasedCogit >> bytecodePC: anInteger [ 
 	<doNotGenerate>
 	bytecodePC := anInteger 
+]
+
+{ #category : 'jitdomain' }
+SimpleStackBasedCogit >> ceCheckProfileTickAddress [
+
+	<inline: true>
+	^ self
+		cCode: [ #ceCheckProfileTick asUnsignedIntegerPtr ]
+		inSmalltalk: [ self simulatedTrampolineFor: #ceCheckProfileTick ]
 ]
 
 { #category : 'accessing' }
@@ -735,7 +746,9 @@ SimpleStackBasedCogit >> compileMachineCodeInterpreterPrimitive: primitiveRoutin
 		arg: SendNumArgsReg
 		"arg: ClassReg (when we extend C call marchalling to support 5 args for replaceFrom:to:with:startingAt:".
 
-	self CallFullRT: primitiveRoutine asInteger.
+	self cppIf: JITDOMAIN
+		ifTrue: [ self CallRT: (self mcprimTrampolineFor: primitiveIndex) ]
+		ifFalse: [ self CallFullRT: primitiveRoutine asInteger ].
 
 	backEnd
 		genRemoveNArgsFromStack: methodOrBlockNumArgs + 1;
@@ -2820,11 +2833,28 @@ SimpleStackBasedCogit >> generateCheckProfileTickFromJump: arrivingJmp returning
 
 	aBlockClosure value.
 
-	self CallFullRT: (self
-			 cCode: [ #ceCheckProfileTick asUnsignedIntegerPtr ]
-			 inSmalltalk: [ self simulatedTrampolineFor: #ceCheckProfileTick ]).
+	self cppIf: JITDOMAIN
+		ifTrue: [ self CallRT: ceCheckProfileTickTrampoline ]
+		ifFalse: [ self CallFullRT: self ceCheckProfileTickAddress ].
 	"reenter the post-primitive call flow"
 	self Jump: returningLabel 
+]
+
+{ #category : 'jitdomain' }
+SimpleStackBasedCogit >> generateJitDomainPrimitiveGates [
+
+	"Generate the gates through which machine code calls C directly: ceCheckProfileTick and the
+	 machine-code primitives"
+
+	<option: #JITDOMAIN>
+	ceCheckProfileTickTrampoline := self
+		genCCallGateFor: self ceCheckProfileTickAddress
+		called: 'ceCheckProfileTickTrampoline'.
+	ceMcprimHashMultiplyTrampoline := self
+		genCCallGateFor: (self
+			cCoerceSimple: (coInterpreter mcprimFunctionForPrimitiveIndex: PrimNumberHashMultiply)
+			to: #'void (*)(void)') asInteger
+		called: 'ceMcprimHashMultiplyTrampoline'
 ]
 
 { #category : 'initialization' }
@@ -2941,6 +2971,16 @@ SimpleStackBasedCogit >> maybeCompileAllocFillerCheck [
 		 self MoveCq: PrimErrWritePastObject R: TempReg.
 		 self MoveR: TempReg Aw: coInterpreter primFailCodeAddress.
 		 jmpOk jmpTarget: self Label]
+]
+
+{ #category : 'jitdomain' }
+SimpleStackBasedCogit >> mcprimTrampolineFor: primIndex [
+
+	"The gate thunk of a machine-code primitive. hashMultiply is the only one (see mcprimFunctionForPrimitiveIndex:)"
+
+	<option: #JITDOMAIN>
+	self assert: primIndex = PrimNumberHashMultiply.
+	^ ceMcprimHashMultiplyTrampoline
 ]
 
 { #category : 'trampolines' }

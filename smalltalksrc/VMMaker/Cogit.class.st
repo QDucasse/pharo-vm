@@ -7936,6 +7936,7 @@ Cogit >> generateTrampolines [
 			self generateRunTimeTrampolines.
 			SistaVM ifTrue: [self generateSistaRuntime].
 			self generateEnilopmarts.
+			self cppIf: JITDOMAIN ifTrue: [ self generateJitDomainPrimitiveGates ].
 			self generateTracingTrampolines.
 			self cppIf: JITDOMAIN ifTrue: [ self closeJitDomainGateArea ].
 			self recordGeneratedRunTime: 'methodZoneBase' address: methodZoneBase]
