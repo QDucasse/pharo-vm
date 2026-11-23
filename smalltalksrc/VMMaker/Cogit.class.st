@@ -6391,25 +6391,57 @@ Cogit >> gateEntryFor: gateAddress called: trampolineName [
 ]
 
 { #category : 'jitdomain' }
+Cogit >> genGatePad: label [
+
+	<option: #JITDOMAIN>
+	^ backEnd genDomainLandingPad: self jitDomainVM label: label
+]
+
+{ #category : 'jitdomain' }
+Cogit >> genGateReturnPopping: numBytes [
+
+	"Return from a gate to its thunk, first popping numBytes off the stack. The thunk's ret then returns to
+	 the address in the link register, as RetN: numBytes would."
+
+	self cppIf: JITDOMAIN
+		ifTrue: [
+			numBytes ~= 0 ifTrue: [ self AddCq: numBytes R: SPReg ].
+			backEnd genDomainReturn ]
+		ifFalse: [ self RetN: numBytes ].
+	^ 0
+]
+
+{ #category : 'jitdomain' }
+Cogit >> genRestoreLinkRegInGate [
+
+	"See genSaveLinkRegInGate"
+
+	<option: #JITDOMAIN>
+	self MoveMw: 0 r: SPReg R: LinkReg.
+	self AddCq: self jitDomainGateFrameSize R: SPReg.
+	^ 0
+]
+
+{ #category : 'jitdomain' }
+Cogit >> genSaveLinkRegInGate [
+
+	"A gate that calls C must keep the link register for its thunk's ret. Save it on the current stack in a
+	 slot that keeps the stack aligned for C."
+
+	<option: #JITDOMAIN>
+	self SubCq: self jitDomainGateFrameSize R: SPReg.
+	self MoveR: LinkReg Mw: 0 r: SPReg.
+	^ 0
+]
+
+{ #category : 'jitdomain' }
 Cogit >> genThunkFor: gateAddress called: trampolineName [
 
-	"Generate the thunk of a gate in the fixed code area and answer its address:
-		auipc/addi x5, gate; domcall x0, x5, DOM0, LBL_GATE; ret
-	 domcall leaves the link register alone, so the gate sees the return address of the call site, as
-	 the trampoline did. Every table and variable that records the trampoline records the thunk."
+	"The thunk of a gate whose pad has the label jitDomainGateLabel. See genThunkFor:called:label:"
 
 	<var: #trampolineName type: #'char *'>
 	<option: #JITDOMAIN>
-	| thunk |
-	self enterFixedCodeArea.
-	thunk := methodZoneBase.
-	self zeroOpcodeIndex.
-	backEnd genDomainCallTo: gateAddress domain: self jitDomainVM label: self jitDomainGateLabel.
-	self RetN: 0.
-	self outputInstructionsForGeneratedRuntimeAt: thunk.
-	self recordGeneratedRunTime: trampolineName address: thunk.
-	self leaveFixedCodeArea.
-	^ thunk
+	^ self genThunkFor: gateAddress called: trampolineName label: self jitDomainGateLabel
 ]
 
 { #category : 'compile abstract instructions' }
@@ -6747,7 +6779,7 @@ Cogit >> genExternalizePointersForPrimitiveCall [
 Cogit >> genGatePad [
 
 	<option: #JITDOMAIN>
-	^ backEnd genDomainLandingPad: self jitDomainVM label: self jitDomainGateLabel
+	^ self genGatePad: self jitDomainGateLabel
 ]
 
 { #category : 'jitdomain' }
@@ -6755,10 +6787,7 @@ Cogit >> genGateReturn [
 
 	"A gate returns to its thunk, which returns to machine code"
 
-	self cppIf: JITDOMAIN
-		ifTrue: [ backEnd genDomainReturn ]
-		ifFalse: [ self RetN: 0 ].
-	^ 0
+	^ self genGateReturnPopping: 0
 ]
 
 { #category : 'initialization' }
@@ -7026,6 +7055,30 @@ Cogit >> genSmalltalkToCStackSwitch: pushLinkReg [
 		ifTrue: [backEnd genLoadCStackPointers]
 		ifFalse: [backEnd genLoadCStackPointer].
 	^0
+]
+
+{ #category : 'jitdomain' }
+Cogit >> genThunkFor: gateAddress called: trampolineName label: label [
+
+	"Generate the thunk of a gate in the fixed code area and answer its address:
+		auipc/addi x5, gate
+		domcall x0, x5, DOM0, label
+		ret
+	 domcall leaves the link register alone, so the gate sees the return address of the call site, as
+	 the trampoline did. Every table and variable that records the trampoline records the thunk."
+
+	<var: #trampolineName type: #'char *'>
+	<option: #JITDOMAIN>
+	| thunk |
+	self enterFixedCodeArea.
+	thunk := methodZoneBase.
+	self zeroOpcodeIndex.
+	backEnd genDomainCallTo: gateAddress domain: self jitDomainVM label: label.
+	self RetN: 0.
+	self outputInstructionsForGeneratedRuntimeAt: thunk.
+	self recordGeneratedRunTime: trampolineName address: thunk.
+	self leaveFixedCodeArea.
+	^ thunk
 ]
 
 { #category : 'initialization' }
@@ -8624,6 +8677,18 @@ Cogit >> jitDomainCode [
 ]
 
 { #category : 'jitdomain' }
+Cogit >> jitDomainFinishGateAt: gateAddress called: trampolineName label: label [
+
+	"Output the gate generated since zeroOpcodeIndex at gateAddress, then generate its thunk. Answer the thunk."
+
+	<var: #trampolineName type: #'char *'>
+	<option: #JITDOMAIN>
+	self outputInstructionsForGeneratedRuntimeAt: gateAddress.
+	self recordGeneratedRunTime: trampolineName address: gateAddress.
+	^ self genThunkFor: gateAddress called: trampolineName label: label
+]
+
+{ #category : 'jitdomain' }
 Cogit >> jitDomainFixedCodeStart [
 
 	"The start of the fixed code area: the first page boundary after the gate area"
@@ -8640,6 +8705,16 @@ Cogit >> jitDomainGateAreaSize [
 
 	<inline: true>
 	^ 16 * 1024
+]
+
+{ #category : 'jitdomain' }
+Cogit >> jitDomainGateFrameSize [
+
+	"The bytes a gate that calls C reserves for the link register: a whole 16-byte slot, as the RISC-V
+	 C ABI requires"
+
+	<inline: true>
+	^ 16
 ]
 
 { #category : 'jitdomain' }
@@ -8668,6 +8743,17 @@ Cogit >> jitDomainResetUdsp [
 	self
 		cCode: [ self ceResetUdsp ]
 		inSmalltalk: [ self simulateLeafCallOf: ceResetUdsp ]
+]
+
+{ #category : 'jitdomain' }
+Cogit >> jitDomainStartGate: label [
+
+	"Start generating a gate: its first instruction is its landing pad, which accepts the domcalls with label"
+
+	<option: #JITDOMAIN>
+	self zeroOpcodeIndex.
+	self genGatePad: label.
+	^ 0
 ]
 
 { #category : 'jitdomain' }
