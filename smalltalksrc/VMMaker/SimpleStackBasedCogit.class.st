@@ -1125,6 +1125,29 @@ SimpleStackBasedCogit >> genBlockReturn [
 	^0
 ]
 
+{ #category : 'jitdomain' }
+SimpleStackBasedCogit >> genCCallGateFor: aRoutine called: trampolineName [
+
+	"Generate a gate that calls the C routine aRoutine with the argument registers machine code loaded,
+	 on the stack it is on, and answer its thunk:
+		domlpad 0, LBL_GATE
+		save ra
+		call aRoutine
+		restore ra
+		domret"
+
+	<var: #trampolineName type: #'char *'>
+	<option: #JITDOMAIN>
+	| gate |
+	gate := methodZoneBase.
+	self jitDomainStartGate: self jitDomainGateLabel.
+	self genSaveLinkRegInGate.
+	self CallFullRT: aRoutine.
+	self genRestoreLinkRegInGate.
+	self genGateReturn.
+	^ self jitDomainFinishGateAt: gate called: trampolineName label: self jitDomainGateLabel
+]
+
 { #category : 'bytecode generators' }
 SimpleStackBasedCogit >> genCallMappedInlinedPrimitive [
 	"Implemented with SistaCogit only"

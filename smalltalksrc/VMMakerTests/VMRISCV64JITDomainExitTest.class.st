@@ -61,6 +61,17 @@ VMRISCV64JITDomainExitTest >> callThunk: thunk [
 ]
 
 { #category : 'helpers' }
+VMRISCV64JITDomainExitTest >> fakeCFunction: aBlock [
+
+	"Machine code standing for a C function: aBlock's code, then ret. Answer its address."
+
+	^ self gateWith: [
+		cogit zeroOpcodeIndex.
+		aBlock value.
+		cogit RetN: 0 ]
+]
+
+{ #category : 'helpers' }
 VMRISCV64JITDomainExitTest >> gateWith: aBlock [
 
 	"Generate a gate whose code aBlock generates, as generateTrampolines does, and answer its address"
@@ -134,6 +145,31 @@ VMRISCV64JITDomainExitTest >> targetOfThunk: thunk [
 	^ thunk
 		+ ((self signed: (self wordAt: thunk) >> 12 bits: 20) << 12)
 		+ (self signed: (self wordAt: thunk + 4) >> 20 bits: 12)
+]
+
+{ #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testCCallGatePassesArgumentsAndResult [
+
+	"A gate that calls a fixed C routine (ceCheckProfileTick, mcprimHashMultiply) leaves the C argument and
+	 result registers alone"
+
+	| function thunk start end |
+	function := self fakeCFunction: [
+		cogit AddCq: 1 R: cogit backEnd cResultRegister ].
+	cogit allocateOpcodes: 20 bytecodes: 0.
+	thunk := cogit genCCallGateFor: function called: 'testCCall'.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	start := self compile: [
+		cogit MoveCq: 41 R: cogit backEnd cResultRegister.
+		cogit CallRT: thunk.
+		cogit MoveR: cogit backEnd cResultRegister R: ReceiverResultReg.
+		end := cogit Label ] bytecodes: 10.
+
+	self runFromTo: start -> end address.
+
+	self assert: machineSimulator receiverRegisterValue equals: 42.
+	self assert: self hart drsDepth equals: 0.
+	self assert: self hart dsp equals: self base
 ]
 
 { #category : 'tests' }
