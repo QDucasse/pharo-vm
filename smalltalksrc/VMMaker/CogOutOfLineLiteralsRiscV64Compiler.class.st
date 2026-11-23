@@ -5114,8 +5114,9 @@ CogOutOfLineLiteralsRiscV64Compiler >> loadCwInto: destReg [
 		inSmalltalk: [ operand := operand bitAnd: 16rFFFFFFFF ]." "Need to clamp the value to a word size since one or two usages actually generate double sized values and rely upon the C code to narrow it within the running VM"
 	(self isAnInstruction: (cogit cCoerceSimple: operand to: #'AbstractInstruction *')) 
 		ifTrue: [ operand := (cogit cCoerceSimple: operand to: #'AbstractInstruction *') address ].
-	"Try to encode the Cw as a pc-relative first"
-	(cogit addressIsInCurrentCompilation: operand)
+	"Pc-relative when the generation pass allocated no literal. Deciding again could differ: for a run-time
+	 routine, methodLabel only gets its address when the routine is output"
+	(dependent isNil or: [ cogit addressIsInCurrentCompilation: operand ])
 		ifTrue: [ 
 			distance := operand signedIntFromLong - address signedIntFromLong.
 			"Split the distance between auipc and addi, see high20BitsOf:

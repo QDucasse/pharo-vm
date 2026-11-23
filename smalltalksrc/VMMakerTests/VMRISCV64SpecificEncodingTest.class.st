@@ -302,6 +302,30 @@ VMRISCV64SpecificEncodingTest >> testAndCqRPositiveBoundaryConstants [
 	self doTestOperation: #AndCq:R: constants: self positiveBoundaryConstants expected: [ :v :c | v bitAnd: c ]
 ]
 
+{ #category : 'tests' }
+VMRISCV64SpecificEncodingTest >> testMoveCwOfAnEarlierRunTimeRoutine [
+
+	"A run-time routine loads the address of the routine generated before it. During generation methodLabel's
+	 address is still that routine's start, so the generation pass allocates no literal: the output pass must
+	 use a pc-relative auipc/addi"
+
+	| first second |
+	cogit allocateOpcodes: 20 bytecodes: 0.
+	first := cogit methodZoneBase.
+	cogit zeroOpcodeIndex.
+	cogit RetN: 0.
+	cogit outputInstructionsForGeneratedRuntimeAt: first.
+	second := cogit methodZoneBase.
+	cogit zeroOpcodeIndex.
+	cogit MoveCw: first R: ReceiverResultReg.
+	cogit RetN: 0.
+	cogit outputInstructionsForGeneratedRuntimeAt: second.
+
+	machineSimulator startAt: second until: second + 8 timeout: 0 count: 10.
+
+	self assert: machineSimulator receiverRegisterValue equals: first
+]
+
 { #category : 'tests - immediate ranges' }
 VMRISCV64SpecificEncodingTest >> testOrCqRNegativeBoundaryConstants [
 
