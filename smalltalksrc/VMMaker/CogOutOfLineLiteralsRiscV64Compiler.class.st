@@ -948,6 +948,7 @@ CogOutOfLineLiteralsRiscV64Compiler >> computeMaximumSize [
 			"Control"
 			([ Call ]                 -> [ ^ self callInstructionByteSize ]).
 			([ CallFull ]             -> [ ^ self literalLoadInstructionBytes + 4 ]).
+			([ CallR ]                -> [ ^ 4 ]).
 			([ JumpR ]                -> [ ^ 4 ]).
 			([ Jump ]                 -> [ ^ 4 ]).
 			([ JumpFull ]             -> [ ^ self literalLoadInstructionBytes + 4 ]).
@@ -2432,6 +2433,16 @@ CogOutOfLineLiteralsRiscV64Compiler >> concretizeJumpOverflow [
 	"Should be rewritten by noteFollowingConditionalBranch:"
 	self unreachable.
 	^0
+]
+
+{ #category : 'concretization' }
+CogOutOfLineLiteralsRiscV64Compiler >> concretizeCallR [
+
+	"jalr ra, 0(reg): call the address in reg"
+
+	<inline: true>
+	self machineCodeAt: 0 put: (self jumpTo: (operands at: 0) withOffset: 0 andStorePreviousPCPlus4in: LR).
+	^ machineCodeSize := 4
 ]
 
 { #category : 'concretization' }
@@ -4005,6 +4016,7 @@ CogOutOfLineLiteralsRiscV64Compiler >> dispatchConcretize [
 		"Control"
 		[Call]					-> [ ^ self concretizeCall ].     "call code within code space"
 		[CallFull]			-> [ ^ self concretizeCallFull ]. "call code anywhere in address space"
+		[CallR]				-> [ ^ self concretizeCallR ].
 		[JumpR]				-> [ ^ self concretizeJumpR ].
 		[JumpFull]			-> [ ^ self concretizeJumpFull ]. "jump within address space"
 		[JumpLong]			-> [ ^ self concretizeJumpLong ]. "jumps witihn code space"
