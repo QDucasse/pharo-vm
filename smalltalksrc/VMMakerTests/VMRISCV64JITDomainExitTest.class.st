@@ -201,6 +201,25 @@ VMRISCV64JITDomainExitTest >> testCapturedBaseIsTheDomainReturnStackPointer [
 ]
 
 { #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testDomainCallWithoutADomainReturnStackFaults [
+
+	"A thread without a DRS has dsp = dspbase = 0: its first domcall faults"
+
+	| gate thunk startToEnd |
+	gate := self gateWith: [
+		cogit zeroOpcodeIndexForGate.
+		cogit genGateReturn ].
+	thunk := cogit gateEntryFor: gate called: 'testGate'.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	startToEnd := self callThunk: thunk.
+	self hart
+		dspbase: 0;
+		dsp: 0.
+
+	self should: [ self runFromTo: startToEnd ] faultWith: #DRS
+]
+
+{ #category : 'tests' }
 VMRISCV64JITDomainExitTest >> testEnilopmartsResetTheDomainReturnStack [
 
 	"Enilopmarts start by dropping the records left above the base"

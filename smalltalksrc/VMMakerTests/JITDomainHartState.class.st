@@ -69,7 +69,8 @@ JITDomainHartState >> domainCallAt: pc word: word in: aSimulator [
 	((gates at: curdom + 1) includes: domain) ifFalse: [ JITDomainFault signal: #GATE pc: pc ].
 	target := (self register: (word >> 15 bitAnd: 31) in: aSimulator) bitClear: 1.
 
-	dsp \\ 8 = 0 ifFalse: [ JITDomainFault signal: #DRS pc: pc ].
+	"Without a DRS (dspbase at its reset value 0, as for a new thread) the push faults"
+	(dspbase = 0 or: [ dsp \\ 8 ~= 0 ]) ifTrue: [ JITDomainFault signal: #DRS pc: pc ].
 	dsp := dsp - 8 \\ (2 raisedTo: 64).
 	drs at: dsp put: pc + 4 -> curdom.
 	self register: (word >> 7 bitAnd: 31) put: pc + 4 in: aSimulator.
