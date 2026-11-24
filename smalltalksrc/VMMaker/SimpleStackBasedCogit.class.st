@@ -6,6 +6,7 @@ Class {
 	#superclass : 'Cogit',
 	#instVars : [
 		'primitiveGeneratorTable',
+		'ceCallPrimitiveTrampoline',
 		'ceCheckProfileTickTrampoline',
 		'ceMcprimHashMultiplyTrampoline',
 		'jitDomainPrimitiveFunctions',
@@ -1182,6 +1183,35 @@ SimpleStackBasedCogit >> genCallPrimitiveBytecode [
 	^0
 ]
 
+{ #category : 'jitdomain' }
+SimpleStackBasedCogit >> genCallPrimitiveInSlot: slotReg [
+
+	"Call the function in slot slotReg of jitDomainPrimitiveFunctions, setting primitiveFunctionPointer to it, as the
+	 interpreter does before calling a primitive. Machine code chose the slot, so a slot out of the table or empty
+	 stops: the VM calls only functions it put in the table. Uses Arg0Reg, which the C call clobbers anyway:
+			bgeu slot, #slots, stop
+			ld   a, table[slot]
+			bnez a, call
+		stop:
+			ebreak
+		call:
+			sd   a, primitiveFunctionPointer
+			jalr ra, a"
+
+	<option: #JITDOMAIN>
+	| jumpOutOfTable jumpFound |
+	self CmpCq: self jitDomainPrimitiveSlots R: slotReg.
+	jumpOutOfTable := self JumpAboveOrEqual: 0.
+	self MoveCw: self jitDomainPrimitiveFunctionsAddress R: Arg0Reg.
+	self MoveXwr: slotReg R: Arg0Reg R: Arg0Reg.
+	self CmpCq: 0 R: Arg0Reg.
+	jumpFound := self JumpNonZero: 0.
+	jumpOutOfTable jmpTarget: self Stop.
+	jumpFound jmpTarget: (self MoveR: Arg0Reg Aw: coInterpreter primitiveFunctionPointerAddress).
+	self CallR: Arg0Reg.
+	^ 0
+]
+
 { #category : 'constant support' }
 SimpleStackBasedCogit >> genCmpConstant: constant R: reg [
 	"If the objectMemory allows it, generates a quick constant cmp, else generates a word constant cmp"
@@ -1916,6 +1946,28 @@ SimpleStackBasedCogit >> genPrimReturnEnterCogCodeEnilopmart: profiling [
 			[self CallFullRT: (self cCode: '(usqIntptr_t)ceCheckProfileTick'
 						inSmalltalk: [self simulatedTrampolineFor: #ceCheckProfileTick])].
 		 self Jump: continuePostSample]
+]
+
+{ #category : 'jitdomain' }
+SimpleStackBasedCogit >> genPrimitiveCallGate [
+
+	"Generate the gate through which machine code calls a C primitive, and answer its thunk. Machine code
+	 has switched to the C stack and passes the primitive's slot of jitDomainPrimitiveFunctions in TempReg:
+		domlpad 0, LBL_PRIM
+		save ra
+		call the function in the slot
+		restore ra
+		domret"
+
+	<option: #JITDOMAIN>
+	| gate |
+	gate := methodZoneBase.
+	self jitDomainStartGate: self jitDomainPrimLabel.
+	self genSaveLinkRegInGate.
+	self genCallPrimitiveInSlot: TempReg.
+	self genRestoreLinkRegInGate.
+	self genGateReturn.
+	^ self jitDomainFinishGateAt: gate called: 'ceCallPrimitiveTrampoline' label: self jitDomainPrimLabel
 ]
 
 { #category : 'primitive generators' }
@@ -2848,10 +2900,11 @@ SimpleStackBasedCogit >> generateCheckProfileTickFromJump: arrivingJmp returning
 { #category : 'jitdomain' }
 SimpleStackBasedCogit >> generateJitDomainPrimitiveGates [
 
-	"Generate the gates through which machine code calls C directly: ceCheckProfileTick and the
-	 machine-code primitives"
+	"Generate the gates through which machine code calls C directly: the primitives (see
+	 compileInterpreterPrimitive:flags:), ceCheckProfileTick and the machine-code primitives"
 
 	<option: #JITDOMAIN>
+	ceCallPrimitiveTrampoline := self genPrimitiveCallGate.
 	ceCheckProfileTickTrampoline := self
 		genCCallGateFor: self ceCheckProfileTickAddress
 		called: 'ceCheckProfileTickTrampoline'.

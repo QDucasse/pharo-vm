@@ -42,6 +42,31 @@ VMRISCV64JITDomainExitTest >> addressesNamed: aString [
 ]
 
 { #category : 'helpers' }
+VMRISCV64JITDomainExitTest >> assertPrimitiveGateStopsOnSlot: slot [
+
+	"The primitive gate stops on slot, forged by machine code: it calls nothing and does not return"
+
+	| function thunk startToEnd |
+	function := self fakeCFunction: [ cogit MoveCq: 42 R: ReceiverResultReg ].
+	cogit jitDomainPrimitiveSlotFor: function.
+	cogit allocateOpcodes: 20 bytecodes: 0.
+	thunk := cogit genPrimitiveCallGate.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	startToEnd := self callThunk: thunk.
+	machineSimulator
+		temporaryRegisterValue: slot;
+		receiverRegisterValue: 0;
+		classRegisterValue: 0.
+
+	"Unicorn reports the ebreak as an invalid instruction"
+	self should: [ self runFromTo: startToEnd ] raise: UnicornError.
+
+	self assert: (self wordAt: machineSimulator instructionPointerRegisterValue) equals: 16r00100073.
+	self assert: machineSimulator receiverRegisterValue equals: 0.
+	self assert: machineSimulator classRegisterValue equals: 0
+]
+
+{ #category : 'helpers' }
 VMRISCV64JITDomainExitTest >> base [
 
 	^ self domainReturnStackBase
@@ -209,6 +234,45 @@ VMRISCV64JITDomainExitTest >> testGateReturnsThroughItsThunk [
 ]
 
 { #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testPrimitiveGateCallsTheFunctionInItsSlot [
+
+	"The primitive gate calls the function in the slot machine code passes, not the one in
+	 primitiveFunctionPointer, which it sets, and returns to the call site through its thunk"
+
+	| function forged thunk startToEnd |
+	function := self fakeCFunction: [ cogit MoveCq: 42 R: ReceiverResultReg ].
+	forged := self fakeCFunction: [ cogit MoveCq: 13 R: ReceiverResultReg ].
+	cogit allocateOpcodes: 20 bytecodes: 0.
+	thunk := cogit genPrimitiveCallGate.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	interpreter primitiveFunctionPointer: forged.
+	startToEnd := self callThunk: thunk.
+	machineSimulator temporaryRegisterValue: (cogit jitDomainPrimitiveSlotFor: function).
+
+	self runFromTo: startToEnd.
+
+	self assert: machineSimulator receiverRegisterValue equals: 42.
+	self assert: machineSimulator classRegisterValue equals: 7.
+	self assert: interpreter primitiveFunctionPointer equals: function.
+	self assert: self hart curdom equals: 0.
+	self assert: self hart drsDepth equals: 0.
+	self assert: self hart dsp equals: self base.
+	self assert: (self hart events detect: [ :e | e first = #domcall ]) last equals: 2
+]
+
+{ #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testPrimitiveGateStopsOnASlotOutOfTheTable [
+
+	self assertPrimitiveGateStopsOnSlot: cogit jitDomainPrimitiveSlots
+]
+
+{ #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testPrimitiveGateStopsOnAnEmptySlot [
+
+	self assertPrimitiveGateStopsOnSlot: cogit jitDomainPrimitiveSlots - 1
+]
+
+{ #category : 'tests' }
 VMRISCV64JITDomainExitTest >> testPrimitiveSlotsAreSharedAndReused [
 
 	"A function keeps its slot, and the slot of a forgotten function goes to the next new one"
@@ -236,7 +300,7 @@ VMRISCV64JITDomainExitTest >> testRunTimeLayout [
 
 	#( 'ceSend0Args' 'ceSuperSendNArgs' 'ceMethodAbort1Args' 'cePICAbort2Args' 'cePICMissNArgs' 'ceStoreCheckTrampoline'
 	   'ceCheckForInterruptsTrampoline' 'ceReturnToInterpreterTrampoline' 'ceBaseFrameReturnTrampoline'
-	   'ceCheckProfileTickTrampoline' 'ceMcprimHashMultiplyTrampoline' ) do: [ :name |
+	   'ceCallPrimitiveTrampoline' 'ceCheckProfileTickTrampoline' 'ceMcprimHashMultiplyTrampoline' ) do: [ :name |
 		| addresses |
 		addresses := self addressesNamed: name.
 		self assert: addresses size equals: 2.
@@ -318,24 +382,23 @@ VMRISCV64JITDomainExitTest >> testThunkToCodeWithoutAPadFaults [
 { #category : 'tests' }
 VMRISCV64JITDomainExitTest >> testThunksCallTheirGatesAtTheirPads [
 
-	"Every gate starts with domlpad 0, 1, and its thunk is auipc/addi x5, gate; domcall x0, x5, 0, 1; ret"
+	"Every gate starts with domlpad 0, label, and its thunk is auipc/addi x5, gate; domcall x0, x5, 0, label; ret.
+	 The label is 2 for the primitive gates, 1 for the others."
 
-	| fixedStart pad domcall ret checked |
+	| ret checked |
 	self generateRunTime.
-	fixedStart := cogit jitDomainFixedCodeStart.
-	pad := cogit backend domainLandingPad: 0 label: 1.
-	domcall := cogit backend domainCallTo: 5 domain: 0 label: 1.
 	ret := 16r00008067.
 	checked := 0.
 	((cogit instVarNamed: 'trampolineAddresses') object first: (cogit instVarNamed: 'trampolineTableIndex'))
 		pairsDo: [ :name :address |
-			| addresses |
+			| addresses label |
 			addresses := self addressesNamed: name.
 			(addresses size = 2 and: [ address = addresses second ]) ifTrue: [
+				label := (name beginsWith: 'ceCallPrimitive') ifTrue: [ 2 ] ifFalse: [ 1 ].
 				self assert: (self targetOfThunk: address) equals: addresses first.
-				self assert: (self wordAt: address + 8) equals: domcall.
+				self assert: (self wordAt: address + 8) equals: (cogit backend domainCallTo: 5 domain: 0 label: label).
 				self assert: (self wordAt: address + 12) equals: ret.
-				self assert: (self wordAt: addresses first) equals: pad.
+				self assert: (self wordAt: addresses first) equals: (cogit backend domainLandingPad: 0 label: label).
 				checked := checked + 1 ] ].
 	self assert: checked > 40
 ]

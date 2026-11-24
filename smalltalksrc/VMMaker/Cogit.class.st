@@ -8735,6 +8735,15 @@ Cogit >> jitDomainPageSize [
 ]
 
 { #category : 'jitdomain' }
+Cogit >> jitDomainPrimLabel [
+
+	"The label of the primitive gates' landing pads: machine code calls a C primitive only through them"
+
+	<inline: true>
+	^ 2
+]
+
+{ #category : 'jitdomain' }
 Cogit >> jitDomainResetUdsp [
 
 	"Drop the Domain Return Stack records above the base, at the longjmp back into the interpreter"
