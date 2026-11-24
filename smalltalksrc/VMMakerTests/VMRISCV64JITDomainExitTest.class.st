@@ -49,7 +49,7 @@ VMRISCV64JITDomainExitTest >> assertPrimitiveGateStopsOnSlot: slot [
 	| function thunk startToEnd |
 	function := self fakeCFunction: [ cogit MoveCq: 42 R: ReceiverResultReg ].
 	cogit jitDomainPrimitiveSlotFor: function.
-	cogit allocateOpcodes: 20 bytecodes: 0.
+	cogit allocateOpcodes: 40 bytecodes: 0.
 	thunk := cogit genPrimitiveCallGate.
 	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
 	startToEnd := self callThunk: thunk.
@@ -102,7 +102,7 @@ VMRISCV64JITDomainExitTest >> gateWith: aBlock [
 	"Generate a gate whose code aBlock generates, as generateTrampolines does, and answer its address"
 
 	| gate |
-	cogit allocateOpcodes: 20 bytecodes: 0.
+	cogit allocateOpcodes: 40 bytecodes: 0.
 	aBlock value.
 	gate := cogit methodZoneBase.
 	cogit outputInstructionsForGeneratedRuntimeAt: gate.
@@ -171,7 +171,7 @@ VMRISCV64JITDomainExitTest >> testCCallGatePassesArgumentsAndResult [
 	| function thunk start end |
 	function := self fakeCFunction: [
 		cogit AddCq: 1 R: cogit backEnd cResultRegister ].
-	cogit allocateOpcodes: 20 bytecodes: 0.
+	cogit allocateOpcodes: 40 bytecodes: 0.
 	thunk := cogit genCCallGateFor: function called: 'testCCall'.
 	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
 	start := self compile: [
@@ -195,7 +195,7 @@ VMRISCV64JITDomainExitTest >> testCCallGateReloadsVarBaseReg [
 
 	| function thunk start end |
 	function := self fakeCFunction: [ cogit MoveR: VarBaseReg R: ReceiverResultReg ].
-	cogit allocateOpcodes: 20 bytecodes: 0.
+	cogit allocateOpcodes: 40 bytecodes: 0.
 	thunk := cogit genCCallGateFor: function called: 'testCCall'.
 	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
 	start := self compile: [
@@ -209,6 +209,34 @@ VMRISCV64JITDomainExitTest >> testCCallGateReloadsVarBaseReg [
 ]
 
 { #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testCCallGateRunsCOnTheCStack [
+
+	"The gate saves the stack and frame pointers machine code called it with into stackPointer and
+	 framePointer, runs the C function on the C stack the VM captured, and returns to the Smalltalk stack"
+
+	| function thunk start end smalltalkSP smalltalkFP |
+	function := self fakeCFunction: [ cogit MoveR: SPReg R: ReceiverResultReg ].
+	cogit allocateOpcodes: 40 bytecodes: 0.
+	thunk := cogit genCCallGateFor: function called: 'testCCall'.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	start := self compile: [
+		cogit CallRT: thunk.
+		end := cogit Label ] bytecodes: 10.
+	smalltalkSP := machineSimulator smalltalkStackPointerRegisterValue.
+	smalltalkFP := machineSimulator framePointerRegisterValue.
+
+	self runFromTo: start -> end address.
+
+	self
+		assert: machineSimulator receiverRegisterValue
+		equals: cogit getCStackPointer asInteger - cogit jitDomainGateFrameSize.
+	self assert: interpreter stackPointer equals: smalltalkSP.
+	self assert: interpreter framePointer equals: smalltalkFP.
+	self assert: machineSimulator smalltalkStackPointerRegisterValue equals: smalltalkSP.
+	self assert: machineSimulator framePointerRegisterValue equals: smalltalkFP
+]
+
+{ #category : 'tests' }
 VMRISCV64JITDomainExitTest >> testCallThroughGatePassesArgumentsAndResult [
 
 	"compileCallThroughGate:… marshals the arguments as compileCallFor:… does, calls the thunk and fetches the
@@ -217,7 +245,7 @@ VMRISCV64JITDomainExitTest >> testCallThroughGatePassesArgumentsAndResult [
 	| function thunk startToEnd |
 	function := self fakeCFunction: [
 		cogit AddCq: 1 R: cogit backEnd cResultRegister ].
-	cogit allocateOpcodes: 20 bytecodes: 0.
+	cogit allocateOpcodes: 40 bytecodes: 0.
 	thunk := cogit genCCallGateFor: function called: 'testCCall'.
 	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
 	startToEnd := self compileWithEnd: [
@@ -307,16 +335,17 @@ VMRISCV64JITDomainExitTest >> testGateReturnsThroughItsThunk [
 { #category : 'tests' }
 VMRISCV64JITDomainExitTest >> testMayCallBackPrimitiveGateReturnsThroughTheEnilopmart [
 
-	"The gate calls the function in the slot, then jumps to the return enilopmart, which sets the link register
-	 to the method's return address and domrets to the thunk"
+	"The gate calls the function in the slot, then jumps to the return enilopmart, which switches back to the
+	 Smalltalk stack, sets the link register to the method's return address and domrets to the thunk"
 
 	| function enilopmart thunk startToEnd |
 	function := self fakeCFunction: [ cogit MoveCq: 42 R: ReceiverResultReg ].
 	enilopmart := self gateWith: [
 		cogit zeroOpcodeIndex.
+		cogit backEnd genLoadStackPointers.
 		cogit MoveAw: interpreter instructionPointerAddress R: LinkReg.
 		cogit genGateReturn ].
-	cogit allocateOpcodes: 20 bytecodes: 0.
+	cogit allocateOpcodes: 40 bytecodes: 0.
 	thunk := cogit genPrimitiveCallGateReturningThrough: enilopmart called: 'testPrimitiveMayCallBack'.
 	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
 	startToEnd := self callThunk: thunk.
@@ -341,7 +370,7 @@ VMRISCV64JITDomainExitTest >> testPrimitiveGateCallsTheFunctionInItsSlot [
 	| function forged thunk startToEnd |
 	function := self fakeCFunction: [ cogit MoveCq: 42 R: ReceiverResultReg ].
 	forged := self fakeCFunction: [ cogit MoveCq: 13 R: ReceiverResultReg ].
-	cogit allocateOpcodes: 20 bytecodes: 0.
+	cogit allocateOpcodes: 40 bytecodes: 0.
 	thunk := cogit genPrimitiveCallGate.
 	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
 	interpreter primitiveFunctionPointer: forged.
@@ -357,6 +386,34 @@ VMRISCV64JITDomainExitTest >> testPrimitiveGateCallsTheFunctionInItsSlot [
 	self assert: self hart drsDepth equals: 0.
 	self assert: self hart dsp equals: self base.
 	self assert: (self hart events detect: [ :e | e first = #domcall ]) last equals: 2
+]
+
+{ #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testPrimitiveGateReturnsToTheStackThePrimitiveLeft [
+
+	"The primitive runs on the C stack and pops its argument through stackPointer, as primitives do. The gate
+	 returns to the Smalltalk stack as the primitive left it"
+
+	| function thunk startToEnd smalltalkSP |
+	function := self fakeCFunction: [
+		cogit MoveR: SPReg R: ReceiverResultReg.
+		cogit MoveAw: cogit stackPointerAddress R: TempReg.
+		cogit AddCq: self wordSize R: TempReg.
+		cogit MoveR: TempReg Aw: cogit stackPointerAddress ].
+	cogit allocateOpcodes: 40 bytecodes: 0.
+	thunk := cogit genPrimitiveCallGate.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	startToEnd := self compileWithEnd: [ cogit CallRT: thunk ].
+	machineSimulator temporaryRegisterValue: (cogit jitDomainPrimitiveSlotFor: function).
+	smalltalkSP := machineSimulator smalltalkStackPointerRegisterValue.
+
+	self runFromTo: startToEnd.
+
+	self
+		assert: machineSimulator receiverRegisterValue
+		equals: cogit getCStackPointer asInteger - cogit jitDomainGateFrameSize.
+	self assert: interpreter stackPointer equals: smalltalkSP + self wordSize.
+	self assert: machineSimulator smalltalkStackPointerRegisterValue equals: smalltalkSP + self wordSize
 ]
 
 { #category : 'tests' }

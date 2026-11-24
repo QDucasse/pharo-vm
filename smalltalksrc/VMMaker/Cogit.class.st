@@ -6466,12 +6466,36 @@ Cogit >> genRestoreLinkRegInGate [
 { #category : 'jitdomain' }
 Cogit >> genSaveLinkRegInGate [
 
-	"A gate that calls C must keep the link register for its thunk's ret. Save it on the current stack in a
-	 slot that keeps the stack aligned for C."
+	"A gate that calls C must keep the link register for its thunk's ret. Save it on the C stack, which the
+	 gate switched to (see genSwitchToCStackInGate), in a slot that keeps the stack aligned for C."
 
 	<option: #JITDOMAIN>
 	self SubCq: self jitDomainGateFrameSize R: SPReg.
 	self MoveR: LinkReg Mw: 0 r: SPReg.
+	^ 0
+]
+
+{ #category : 'jitdomain' }
+Cogit >> genSwitchToCStackInGate [
+
+	"Switch from the stack machine code called the gate on to the C stack. Save the stack and frame pointers
+	 into stackPointer and framePointer, where the VM finds the Smalltalk stack, then load the C stack the VM
+	 captured: C never builds its frames at a stack pointer machine code chose. As the trampolines do with
+	 genSmalltalkToCStackSwitch:, which machine code no longer does before calling a gate"
+
+	<option: #JITDOMAIN>
+	self genSmalltalkToCStackSwitch: false.
+	^ 0
+]
+
+{ #category : 'jitdomain' }
+Cogit >> genSwitchToSmalltalkStackInGate [
+
+	"Return from the C stack to the Smalltalk stack as the C routine left it in stackPointer and framePointer
+	 (a primitive pops its arguments and pushes its result there)"
+
+	<option: #JITDOMAIN>
+	backEnd genLoadStackPointers.
 	^ 0
 ]
 
@@ -6802,17 +6826,27 @@ Cogit >> genEntryPad [
 
 { #category : 'trampoline support' }
 Cogit >> genExternalizePointersForPrimitiveCall [
-	self MoveR: FPReg Aw: coInterpreter framePointerAddress.
-	backEnd hasLinkRegister
+	"With JITDOMAIN the primitive gate saves the frame and stack pointers itself (see
+	 genSwitchToCStackInGate): machine code only saves the return pc"
+	self cppIf: JITDOMAIN
 		ifTrue:
-			["Set coInterpreter stackPointer to the topmost argument, skipping the return address."
-			 self MoveR: SPReg Aw: coInterpreter stackPointerAddress.
-			 self MoveR: LinkReg Aw: coInterpreter instructionPointerAddress]
+			[backEnd hasLinkRegister
+				ifTrue: [self MoveR: LinkReg Aw: coInterpreter instructionPointerAddress]
+				ifFalse:
+					[self PopR: TempReg. "get retpc"
+					 self MoveR: TempReg Aw: coInterpreter instructionPointerAddress]]
 		ifFalse:
-			[self PopR: TempReg. "get retpc"
-			 self MoveR: TempReg Aw: coInterpreter instructionPointerAddress.
-			 "Set coInterpreter stackPointer to the topmost argument, skipping the return address."
-			 self MoveR: SPReg Aw: coInterpreter stackPointerAddress].
+			[self MoveR: FPReg Aw: coInterpreter framePointerAddress.
+			 backEnd hasLinkRegister
+				ifTrue:
+					["Set coInterpreter stackPointer to the topmost argument, skipping the return address."
+					 self MoveR: SPReg Aw: coInterpreter stackPointerAddress.
+					 self MoveR: LinkReg Aw: coInterpreter instructionPointerAddress]
+				ifFalse:
+					[self PopR: TempReg. "get retpc"
+					 self MoveR: TempReg Aw: coInterpreter instructionPointerAddress.
+					 "Set coInterpreter stackPointer to the topmost argument, skipping the return address."
+					 self MoveR: SPReg Aw: coInterpreter stackPointerAddress]].
 	^0
 ]
 

@@ -515,8 +515,8 @@ SimpleStackBasedCogit >> compileInterpreterPrimitive: primitiveRoutine flags: fl
 
 	"Save processor fp, sp and return pc in the interpreter's frame stack and instruction pointers"
 	self genExternalizePointersForPrimitiveCall.
-	"Switch to the C stack."
-	self genLoadCStackPointersForPrimCall.
+	"Switch to the C stack. With JITDOMAIN the primitive gate does (see genSwitchToCStackInGate)"
+	self cppIf: JITDOMAIN ifTrue: [] ifFalse: [self genLoadCStackPointersForPrimCall].
 
 	(flags anyMask: PrimCallCollectsProfileSamples) ifTrue:
 		["Test nextProfileTick for being non-zero and call checkProfileTick if so"
@@ -605,7 +605,8 @@ SimpleStackBasedCogit >> compileInterpreterPrimitive: primitiveRoutine flags: fl
 	In either case we can push the instructionPointer or load it into the LinkRegister to reestablish the return pc"
 	self MoveAw: coInterpreter instructionPointerAddress
 		R: (backEnd hasLinkRegister ifTrue: [LinkReg] ifFalse: [ClassReg]).
-	backEnd genLoadStackPointers.
+	"With JITDOMAIN the gate already switched back (see genSwitchToSmalltalkStackInGate)"
+	self cppIf: JITDOMAIN ifTrue: [] ifFalse: [backEnd genLoadStackPointers].
 	"Test primitive failure"
 	self MoveAw: coInterpreter primFailCodeAddress R: TempReg.
 	backEnd hasLinkRegister ifFalse: [self PushR: ClassReg]. "Restore return pc on CISCs"
@@ -663,8 +664,8 @@ SimpleStackBasedCogit >> compileInterpreterPrimitiveMayCallBack: primitiveRoutin
 
 	"Save processor fp, sp and return pc in the interpreter's frame stack and instruction pointers"
 	self genExternalizePointersForPrimitiveCall.
-	"Switch to the C stack."
-	self genLoadCStackPointersForPrimCall.
+	"Switch to the C stack. With JITDOMAIN the primitive gate does (see genSwitchToCStackInGate)"
+	self cppIf: JITDOMAIN ifTrue: [] ifFalse: [self genLoadCStackPointersForPrimCall].
 
 	(flags anyMask: PrimCallCollectsProfileSamples) ifTrue:
 		["Test nextProfileTick for being non-zero and call checkProfileTick if so"
@@ -752,7 +753,8 @@ SimpleStackBasedCogit >> compileInterpreterPrimitiveMayCallBack: primitiveRoutin
 { #category : 'primitive generators' }
 SimpleStackBasedCogit >> compileMachineCodeInterpreterPrimitive: primitiveRoutine [
 	"Compile a call to a machine-code convention interpreter primitive.  Call the C routine
-	 on the Smalltalk stack, assuming it consumes little or no stack space."
+	 on the Smalltalk stack, assuming it consumes little or no stack space. With JITDOMAIN, through
+	 a gate, which runs it on the C stack."
 	<var: #primitiveRoutine declareC: 'void (*primitiveRoutine)(void)'>
 	| jmpFail liveRegsMask |
 	
@@ -779,7 +781,8 @@ SimpleStackBasedCogit >> compileMachineCodeInterpreterPrimitive: primitiveRoutin
 		 "offset := self bitCountOf: (liveRegsMask bitAnd: CallerSavedRegisterMask)."
 		 self shouldBeImplemented].
 
-	backEnd prepareStackToCallCFunctionInSmalltalkStack: methodOrBlockNumArgs + 1.
+	"With JITDOMAIN the C routine runs on the C stack, which its gate switches to (see genSwitchToCStackInGate)"
+	self cppIf: JITDOMAIN ifTrue: [] ifFalse: [backEnd prepareStackToCallCFunctionInSmalltalkStack: methodOrBlockNumArgs + 1].
 	
 	backEnd
 		genMarshallNArgs: methodOrBlockNumArgs + 1
@@ -793,10 +796,9 @@ SimpleStackBasedCogit >> compileMachineCodeInterpreterPrimitive: primitiveRoutin
 		ifTrue: [ self CallRT: (self mcprimTrampolineFor: primitiveIndex) ]
 		ifFalse: [ self CallFullRT: primitiveRoutine asInteger ].
 
-	backEnd
-		genRemoveNArgsFromStack: methodOrBlockNumArgs + 1;
-		returnFromCallCFunctionInSmalltalkStack: methodOrBlockNumArgs + 1;
-		genRestoreRegs: (liveRegsMask bitAnd: CallerSavedRegisterMask).
+	backEnd genRemoveNArgsFromStack: methodOrBlockNumArgs + 1.
+	self cppIf: JITDOMAIN ifTrue: [] ifFalse: [backEnd returnFromCallCFunctionInSmalltalkStack: methodOrBlockNumArgs + 1].
+	backEnd genRestoreRegs: (liveRegsMask bitAnd: CallerSavedRegisterMask).
 
 	backEnd hasLinkRegister 
 		ifTrue: [ self MoveR: Extra0Reg R: LinkReg ].
@@ -866,7 +868,10 @@ SimpleStackBasedCogit >> compileMegamorphicIC: selector numArgs: numArgs [
 	jumpSelectorMiss jmpTarget: self Label.
 	self numRegArgs > 0 ifTrue:
 		[backEnd genPushRegisterArgsForNumArgs: numArgs scratchReg: SendNumArgsReg].
-	self genSmalltalkToCStackSwitch: true.
+	"With JITDOMAIN the gate switches to the C stack (see genSwitchToCStackInGate)"
+	self cppIf: JITDOMAIN
+		ifTrue: [backEnd hasLinkRegister ifTrue: [self PushR: LinkReg]]
+		ifFalse: [self genSmalltalkToCStackSwitch: true].
 	methodLabel addDependent: (self annotateAbsolutePCRef: (self MoveCw: methodLabel asInteger R: SendNumArgsReg)).
 	self cppIf: JITDOMAIN
 		ifTrue:
@@ -1196,12 +1201,16 @@ SimpleStackBasedCogit >> genBlockReturn [
 { #category : 'jitdomain' }
 SimpleStackBasedCogit >> genCCallGateFor: aRoutine called: trampolineName [
 
-	"Generate a gate that calls the C routine aRoutine with the argument registers machine code loaded,
-	 on the stack it is on, and answer its thunk:
+	"Generate a gate that calls the C routine aRoutine with the argument registers machine code loaded, on
+	 the C stack, and answer its thunk:
 		domlpad 0, LBL_GATE
+		reload VarBaseReg
+		save sp, fp into stackPointer, framePointer
+		sp := CStackPointer
 		save ra
 		call aRoutine
 		restore ra
+		sp, fp := stackPointer, framePointer
 		domret"
 
 	<var: #trampolineName type: #'char *'>
@@ -1209,9 +1218,11 @@ SimpleStackBasedCogit >> genCCallGateFor: aRoutine called: trampolineName [
 	| gate |
 	gate := methodZoneBase.
 	self jitDomainStartGate: self jitDomainGateLabel.
+	self genSwitchToCStackInGate.
 	self genSaveLinkRegInGate.
 	self CallFullRT: aRoutine.
 	self genRestoreLinkRegInGate.
+	self genSwitchToSmalltalkStackInGate.
 	self genGateReturn.
 	^ self jitDomainFinishGateAt: gate called: trampolineName label: self jitDomainGateLabel
 ]
@@ -2001,20 +2012,28 @@ SimpleStackBasedCogit >> genPrimReturnEnterCogCodeEnilopmart: profiling [
 SimpleStackBasedCogit >> genPrimitiveCallGate [
 
 	"Generate the gate through which machine code calls a C primitive, and answer its thunk. Machine code
-	 has switched to the C stack and passes the primitive's slot of jitDomainPrimitiveFunctions in TempReg:
+	 passes the primitive's slot of jitDomainPrimitiveFunctions in TempReg, on the Smalltalk stack with the
+	 receiver and arguments pushed. The gate switches to the C stack, and back to the Smalltalk stack as the
+	 primitive left it:
 		domlpad 0, LBL_PRIM
+		reload VarBaseReg
+		save sp, fp into stackPointer, framePointer
+		sp := CStackPointer
 		save ra
 		call the function in the slot
 		restore ra
+		sp, fp := stackPointer, framePointer
 		domret"
 
 	<option: #JITDOMAIN>
 	| gate |
 	gate := methodZoneBase.
 	self jitDomainStartGate: self jitDomainPrimLabel.
+	self genSwitchToCStackInGate.
 	self genSaveLinkRegInGate.
 	self genCallPrimitiveInSlot: TempReg.
 	self genRestoreLinkRegInGate.
+	self genSwitchToSmalltalkStackInGate.
 	self genGateReturn.
 	^ self jitDomainFinishGateAt: gate called: 'ceCallPrimitiveTrampoline' label: self jitDomainPrimLabel
 ]
@@ -2025,8 +2044,12 @@ SimpleStackBasedCogit >> genPrimitiveCallGateReturningThrough: primReturnEnilopm
 	"Generate the gate through which machine code calls a C primitive that may call back, and answer its
 	 thunk. Machine code passes the primitive's slot in TempReg, as for genPrimitiveCallGate. The primitive
 	 returns into the gate, which continues in primReturnEnilopmart (cePrimReturnEnterCogCode), as the direct
-	 call did by substituting it as return address. The enilopmart returns to the thunk with domret:
+	 call did by substituting it as return address. The enilopmart switches back to the Smalltalk stack and
+	 returns to the thunk with domret:
 		domlpad 0, LBL_PRIM
+		reload VarBaseReg
+		save sp, fp into stackPointer, framePointer
+		sp := CStackPointer
 		call the function in the slot
 		j primReturnEnilopmart
 	 A call then a jump rather than a substituted return address: the same, as nothing looks at the
@@ -2037,6 +2060,7 @@ SimpleStackBasedCogit >> genPrimitiveCallGateReturningThrough: primReturnEnilopm
 	| gate |
 	gate := methodZoneBase.
 	self jitDomainStartGate: self jitDomainPrimLabel.
+	self genSwitchToCStackInGate.
 	self genCallPrimitiveInSlot: TempReg.
 	self JumpLong: primReturnEnilopmart.
 	^ self jitDomainFinishGateAt: gate called: trampolineName label: self jitDomainPrimLabel
