@@ -5031,6 +5031,34 @@ Cogit >> compileCallFor: aRoutine numArgs: numArgs arg: regOrConst0 arg: regOrCo
 	backEnd genRestoreRegs: regsToSave
 ]
 
+{ #category : 'jitdomain' }
+Cogit >> compileCallThroughGate: thunk numArgs: numArgs arg: regOrConst0 arg: regOrConst1 arg: regOrConst2 arg: regOrConst3 resultReg: resultRegOrNone regsToSave: regMask [
+
+	"As compileCallFor:numArgs:arg:arg:arg:arg:resultReg:regsToSave:, but call thunk, the thunk of a gate that
+	 calls the C routine (see genCCallGateFor:called:), instead of calling the routine: method code never calls
+	 C directly"
+
+	<option: #JITDOMAIN>
+	<inline: false>
+	| regsToSave |
+	regsToSave := resultRegOrNone = NoReg
+						ifTrue: [regMask]
+						ifFalse: [regMask bitClear: (self registerMaskFor: resultRegOrNone)].
+	cStackAlignment > objectMemory wordSize ifTrue:
+		[backEnd
+			genAlignCStackSavingRegisters: regsToSave
+			numArgs: numArgs
+			wordAlignment: cStackAlignment / objectMemory wordSize].
+	backEnd
+		genSaveRegs: regsToSave;
+		genMarshallNArgs: numArgs arg: regOrConst0 arg: regOrConst1 arg: regOrConst2 arg: regOrConst3.
+	self CallRT: thunk.
+	resultRegOrNone ~= NoReg ifTrue:
+		[backEnd genWriteCResultIntoReg: resultRegOrNone].
+	backEnd genRemoveNArgsFromStack: numArgs.
+	backEnd genRestoreRegs: regsToSave
+]
+
 { #category : 'compile abstract instructions' }
 Cogit >> compileCogFullBlockMethod: numCopied [
 	<returnTypeC: #'CogMethod *'>

@@ -92,6 +92,15 @@ VMSimpleStackBasedCogitAbstractTest >> abstractInstructions [
 ]
 
 { #category : 'helpers' }
+VMSimpleStackBasedCogitAbstractTest >> assertDomainCallThrough: thunk [
+
+	"The hart entered a gate through thunk: a domcall at thunk + 8, after its auipc/addi"
+
+	self assert: (machineSimulator jitDomain events anySatisfy: [ :event |
+			event first = #domcall and: [ event second = (thunk + 8) ] ])
+]
+
+{ #category : 'helpers' }
 VMSimpleStackBasedCogitAbstractTest >> assertPushed: anOop after: aBlockClosure [
 	
 	| before after |

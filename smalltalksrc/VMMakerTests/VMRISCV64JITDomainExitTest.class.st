@@ -188,6 +188,37 @@ VMRISCV64JITDomainExitTest >> testCCallGatePassesArgumentsAndResult [
 ]
 
 { #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testCallThroughGatePassesArgumentsAndResult [
+
+	"compileCallThroughGate:… marshals the arguments as compileCallFor:… does, calls the thunk and fetches the
+	 C result"
+
+	| function thunk startToEnd |
+	function := self fakeCFunction: [
+		cogit AddCq: 1 R: cogit backEnd cResultRegister ].
+	cogit allocateOpcodes: 20 bytecodes: 0.
+	thunk := cogit genCCallGateFor: function called: 'testCCall'.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	startToEnd := self compileWithEnd: [
+		cogit
+			compileCallThroughGate: thunk
+			numArgs: 1
+			arg: (cogit trampolineArgConstant: 41)
+			arg: nil
+			arg: nil
+			arg: nil
+			resultReg: ClassReg
+			regsToSave: cogit emptyRegisterMask ].
+
+	self runFromTo: startToEnd.
+
+	self assert: machineSimulator classRegisterValue equals: 42.
+	self assertDomainCallThrough: thunk.
+	self assert: self hart drsDepth equals: 0.
+	self assert: self hart dsp equals: self base
+]
+
+{ #category : 'tests' }
 VMRISCV64JITDomainExitTest >> testCapturedBaseIsTheDomainReturnStackPointer [
 
 	cogit genJitDomainUdspRoutines.
