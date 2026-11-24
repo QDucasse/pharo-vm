@@ -883,7 +883,8 @@ VMSimpleStackBasedCogitAbstractTest >> setUp [
 	self initializeInitialStackFrame.
 	self jitDomain ifTrue: [
 		self setUpDomainReturnStack.
-		interpreter captureJitDomainStackZone ]
+		interpreter captureJitDomainStackZone.
+		cogit setJitDomainThreadPointer: self vmThreadPointer ]
 ]
 
 { #category : 'running' }
@@ -990,6 +991,14 @@ VMSimpleStackBasedCogitAbstractTest >> top [
 VMSimpleStackBasedCogitAbstractTest >> topAddress [
 	
 	^ self top integerAt: 1 size: self wordSize signed: false
+]
+
+{ #category : 'running' }
+VMSimpleStackBasedCogitAbstractTest >> vmThreadPointer [
+
+	"The thread pointer the gates reload before calling C, as if the VM's thread had it"
+
+	^ 16r7F00ABCD0000
 ]
 
 { #category : 'helpers - registers' }

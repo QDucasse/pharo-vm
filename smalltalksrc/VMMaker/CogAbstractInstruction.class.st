@@ -862,6 +862,16 @@ CogAbstractInstruction >> genLoadStackPointers [
 	self subclassResponsibility
 ]
 
+{ #category : 'jitdomain' }
+CogAbstractInstruction >> genLoadThreadPointerFrom: anAddress [
+
+	"Load the thread pointer register from anAddress. Only the RISC-V backend implements JITDomain."
+
+	<option: #JITDOMAIN>
+	self unreachable.
+	^ 0
+]
+
 { #category : 'abi' }
 CogAbstractInstruction >> genMarshallNArgs: numArgs arg: regOrConst0 arg: regOrConst1 arg: regOrConst2 arg: regOrConst3 [
 	"Generate the code to pass up to four arguments in a C run-time call.  Hack: each argument is

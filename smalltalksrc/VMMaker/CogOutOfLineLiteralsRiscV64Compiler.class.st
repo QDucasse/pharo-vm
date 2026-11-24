@@ -1396,6 +1396,16 @@ CogOutOfLineLiteralsRiscV64Compiler >> genDomainReturn [
 ]
 
 { #category : 'jitdomain' }
+CogOutOfLineLiteralsRiscV64Compiler >> genLoadThreadPointerFrom: anAddress [
+
+	"Load tp (x4), the thread pointer, from anAddress"
+
+	<option: #JITDOMAIN>
+	cogit MoveAw: anAddress R: X4.
+	^ 0
+]
+
+{ #category : 'jitdomain' }
 CogOutOfLineLiteralsRiscV64Compiler >> genMoveRUdsp: reg [
 
 	<returnTypeC: #'AbstractInstruction *'>

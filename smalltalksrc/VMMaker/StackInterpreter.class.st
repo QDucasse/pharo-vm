@@ -3711,6 +3711,14 @@ StackInterpreter >> cannotAssign: resultObj to: targetObj withIndex: index [
 ]
 
 { #category : 'initialization' }
+StackInterpreter >> captureJitDomainThreadPointer [
+
+	"The VM thread is about to run Smalltalk. Only the JIT has something to do: see CoInterpreter"
+
+	<inline: true>
+]
+
+{ #category : 'initialization' }
 StackInterpreter >> captureJitDomainStackZone [
 
 	"The stack pages are allocated. Only the JIT has something to do: see CoInterpreter"
@@ -7483,6 +7491,7 @@ StackInterpreter >> initStackPagesAndInterpret [
 
 	self initStackPages.
 	self captureJitDomainStackZone.
+	self captureJitDomainThreadPointer.
 	
 	"Once the stack pages are initialized we can continue to bootstrap the system."
 	self loadInitialContext.

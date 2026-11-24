@@ -438,6 +438,12 @@ UnicornProcessor >> t0: anInteger [
 ]
 
 { #category : 'as yet unclassified' }
+UnicornProcessor >> tp: anInteger [ 
+	
+	machineSimulator x4: anInteger
+]
+
+{ #category : 'as yet unclassified' }
 UnicornProcessor >> w25: anInteger [ 
 	
 	machineSimulator w25: anInteger 

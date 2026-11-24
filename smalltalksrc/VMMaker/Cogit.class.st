@@ -209,6 +209,7 @@ Class {
 		'jitDomainUdspBase',
 		'jitDomainStackZoneBottom',
 		'jitDomainStackZoneTop',
+		'jitDomainThreadPointer',
 		'fixedCodeCursor',
 		'savedMethodZoneBase',
 		'ordinarySendTrampolines',
@@ -466,6 +467,7 @@ Cogit class >> declareCVarsIn: aCCodeGenerator [
 		var: #jitDomainUdspBase type: #usqIntptr_t;
 		var: #jitDomainStackZoneBottom type: #usqIntptr_t;
 		var: #jitDomainStackZoneTop type: #usqIntptr_t;
+		var: #jitDomainThreadPointer type: #usqIntptr_t;
 		var: #ceCaptureCStackPointers
 		declareC: 'void (*ceCaptureCStackPointers)(void)';
 		var: #ceEnterCogCodePopReceiverReg
@@ -6483,6 +6485,19 @@ Cogit >> genGateReturnPopping: numBytes [
 ]
 
 { #category : 'jitdomain' }
+Cogit >> genReloadThreadPointerInGate [
+
+	"Machine code chose every register a gate is entered with, the thread pointer included. C reaches its
+	 thread-local variables through it (libc's errno, malloc's per-thread caches), so with the one machine code
+	 left, C would read and write them wherever machine code pointed it. Reload the VM thread's (see
+	 CoInterpreter >> captureJitDomainThreadPointer). Machine code never uses the thread pointer."
+
+	<option: #JITDOMAIN>
+	backEnd genLoadThreadPointerFrom: self jitDomainThreadPointerAddress.
+	^ 0
+]
+
+{ #category : 'jitdomain' }
 Cogit >> genReloadVarBaseRegInGate [
 
 	"Machine code chose every register a gate is entered with, VarBaseReg included. A gate reaches the VM
@@ -8146,6 +8161,16 @@ Cogit >> getJitDomainStackZoneTop [
 ]
 
 { #category : 'jitdomain' }
+Cogit >> getJitDomainThreadPointer [
+
+	"The thread pointer of the thread that runs the VM (see genReloadThreadPointerInGate)"
+
+	<api>
+	<returnTypeC: #usqIntptr_t>
+	^ jitDomainThreadPointer
+]
+
+{ #category : 'jitdomain' }
 Cogit >> getJitDomainUdspBase [
 
 	"The value the enilopmarts write into udsp: the Domain Return Stack pointer when the VM last
@@ -8922,7 +8947,17 @@ Cogit >> jitDomainStartGate: label [
 	self zeroOpcodeIndex.
 	self genGatePad: label.
 	self genReloadVarBaseRegInGate.
+	self genReloadThreadPointerInGate.
 	^ 0
+]
+
+{ #category : 'jitdomain' }
+Cogit >> jitDomainThreadPointerAddress [
+
+	<returnTypeC: #usqInt>
+	^ self
+		cCode: [ (self addressOf: jitDomainThreadPointer) asUnsignedInteger ]
+		inSmalltalk: [ self simulatedReadWriteVariableAddress: #getJitDomainThreadPointer in: self ]
 ]
 
 { #category : 'jitdomain' }
@@ -11771,6 +11806,7 @@ Cogit >> setInterpreter: aCoInterpreter [
 	trampolineTableIndex := 0.
 	jitDomainUdspBase := 0.
 	jitDomainStackZoneBottom := jitDomainStackZoneTop := 0.
+	jitDomainThreadPointer := 0.
 
 	extA := numExtB := extB := 0.
 
@@ -11787,6 +11823,14 @@ Cogit >> setJitDomainStackZoneBottom: bottom top: top [
 	<var: #top type: #usqIntptr_t>
 	jitDomainStackZoneBottom := bottom.
 	jitDomainStackZoneTop := top
+]
+
+{ #category : 'jitdomain' }
+Cogit >> setJitDomainThreadPointer: aThreadPointer [
+
+	<api>
+	<var: #aThreadPointer type: #usqIntptr_t>
+	jitDomainThreadPointer := aThreadPointer
 ]
 
 { #category : 'jitdomain' }
@@ -12586,7 +12630,8 @@ Cogit >> zeroOpcodeIndexForGate [
 	self zeroOpcodeIndex.
 	self cppIf: JITDOMAIN ifTrue: [
 		self genGatePad.
-		self genReloadVarBaseRegInGate ]
+		self genReloadVarBaseRegInGate.
+		self genReloadThreadPointerInGate ]
 ]
 
 { #category : 'accessing' }

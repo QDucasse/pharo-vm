@@ -925,6 +925,19 @@ CoInterpreter >> callRegisterArgCogMethod: cogMethod at: entryOffset receiver: r
 ]
 
 { #category : 'initialization' }
+CoInterpreter >> captureJitDomainThreadPointer [
+
+	"The VM thread is about to run Smalltalk: give its thread pointer to the gates, which reload it before
+	 calling C (see Cogit >> genReloadThreadPointerInGate). Only this thread runs machine code."
+
+	<inline: false> "C code in a string cannot be inlined"
+	self cppIf: JITDOMAIN ifTrue: [
+		cogit setJitDomainThreadPointer: (self
+			cCode: '(usqIntptr_t)__builtin_thread_pointer()'
+			inSmalltalk: [ cogit getJitDomainThreadPointer ]) ]
+]
+
+{ #category : 'initialization' }
 CoInterpreter >> captureJitDomainStackZone [
 
 	"The stack pages are allocated: give their bounds to the gates, which stop if machine code calls them with a

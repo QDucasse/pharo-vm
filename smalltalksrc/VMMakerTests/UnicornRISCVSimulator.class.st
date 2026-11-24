@@ -1086,6 +1086,12 @@ UnicornRISCVSimulator >> x4 [
 ]
 
 { #category : 'machine registers' }
+UnicornRISCVSimulator >> x4: aValue [
+
+	^ self writeRegister: UcRISCVRegisters x4 value: aValue
+]
+
+{ #category : 'machine registers' }
 UnicornRISCVSimulator >> x5 [
 
 	^ self readRegister: UcRISCVRegisters x5

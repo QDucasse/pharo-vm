@@ -216,6 +216,26 @@ VMRISCV64JITDomainExitTest >> testCCallGatePassesArgumentsAndResult [
 ]
 
 { #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testCCallGateReloadsTheThreadPointer [
+
+	"Machine code changes tp before calling a gate. The gate reloads the VM thread's before calling C"
+
+	| thunk startToEnd |
+	cogit allocateOpcodes: 80 bytecodes: 0.
+	thunk := cogit
+		genCCallGateFor: (self fakeCFunction: [ cogit MoveCq: 42 R: ReceiverResultReg ])
+		called: 'testCCall'.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	startToEnd := self callThunk: thunk.
+	machineSimulator x4: 16r1000.
+
+	self runFromTo: startToEnd.
+
+	self assert: machineSimulator receiverRegisterValue equals: 42.
+	self assert: machineSimulator x4 equals: self vmThreadPointer
+]
+
+{ #category : 'tests' }
 VMRISCV64JITDomainExitTest >> testCCallGateReloadsVarBaseReg [
 
 	"Machine code aims VarBaseReg elsewhere before calling a gate that starts with jitDomainStartGate:. The
@@ -666,6 +686,26 @@ VMRISCV64JITDomainExitTest >> compileWithEnd: aBlock [
 	| start end |
 	start := self compile: [ aBlock value. end := cogit Label ] bytecodes: 10.
 	^ start -> end address
+]
+
+{ #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testTrampolineGateReloadsTheThreadPointer [
+
+	"Machine code changes tp before calling a gate that starts with zeroOpcodeIndexForGate, as every
+	 trampoline does. The gate reloads the VM thread's right after its pad"
+
+	| gate thunk startToEnd |
+	gate := self gateWith: [
+		cogit zeroOpcodeIndexForGate.
+		cogit genGateReturn ].
+	thunk := cogit gateEntryFor: gate called: 'testGate'.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	startToEnd := self callThunk: thunk.
+	machineSimulator x4: 16r1000.
+
+	self runFromTo: startToEnd.
+
+	self assert: machineSimulator x4 equals: self vmThreadPointer
 ]
 
 { #category : 'tests' }
