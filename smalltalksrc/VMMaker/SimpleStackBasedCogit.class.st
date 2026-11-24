@@ -7,6 +7,8 @@ Class {
 	#instVars : [
 		'primitiveGeneratorTable',
 		'ceCallPrimitiveTrampoline',
+		'ceCallPrimitiveMayCallBackTrampoline',
+		'ceCallPrimitiveMayCallBackProfilingTrampoline',
 		'ceCheckProfileTickTrampoline',
 		'ceMcprimHashMultiplyTrampoline',
 		'jitDomainPrimitiveFunctions',
@@ -677,11 +679,15 @@ SimpleStackBasedCogit >> compileInterpreterPrimitiveMayCallBack: primitiveRoutin
 		[self MoveCq: methodOrBlockNumArgs R: TempReg].
 	self MoveR: TempReg Aw: coInterpreter argumentCountAddress.
 
-	"If required, set primitiveFunctionPointer and newMethod"
+	"If required, set primitiveFunctionPointer and newMethod. With JITDOMAIN the primitive gate sets
+	 primitiveFunctionPointer (see genCallPrimitiveInSlot:)"
 	(flags anyMask: PrimCallNeedsPrimitiveFunction) ifTrue:
-		[self MoveCw: primitiveRoutine asInteger R: TempReg.
-		 primSetFunctionLabel :=
-		 self MoveR: TempReg Aw: coInterpreter primitiveFunctionPointerAddress].
+		[self cppIf: JITDOMAIN
+			ifTrue: []
+			ifFalse:
+				[self MoveCw: primitiveRoutine asInteger R: TempReg.
+				 primSetFunctionLabel :=
+				 self MoveR: TempReg Aw: coInterpreter primitiveFunctionPointerAddress]].
 	(flags anyMask: PrimCallNeedsNewMethod+PrimCallMayCallBack) ifTrue:
 		["The ceActivateFailingPrimitiveMethod: machinery can't handle framelessness."
 		 (flags anyMask: PrimCallMayCallBack) ifTrue:
@@ -699,13 +705,22 @@ SimpleStackBasedCogit >> compileInterpreterPrimitiveMayCallBack: primitiveRoutin
 			"On Spur ceActivateFailingPrimitiveMethod: would like to retry if forwarders
 			  are found. So insist on PrimCallNeedsPrimitiveFunction being set too."
 			 self assert: (flags anyMask: PrimCallNeedsPrimitiveFunction).
-			 backEnd
-				genMarshallNArgs: 0 arg: 0 arg: 0 arg: 0 arg: 0;
-				genSubstituteReturnAddress:
-					((flags anyMask: PrimCallCollectsProfileSamples)
-						ifTrue: [cePrimReturnEnterCogCodeProfiling]
-						ifFalse: [cePrimReturnEnterCogCode]).
-			 primInvokeInstruction := self JumpFullRT: primitiveRoutine asInteger.
+			 self cppIf: JITDOMAIN
+				ifTrue:
+					["Pass the primitive's slot, as compileInterpreterPrimitive:flags: does. The gate calls the
+					  primitive, then continues in cePrimReturnEnterCogCode, which returns to its thunk"
+					 self MoveUniqueCw: (self jitDomainPrimitiveSlotFor: primitiveRoutine asUnsignedInteger) R: TempReg.
+					 primSetFunctionLabel := primInvokeInstruction := self CallRT: ((flags anyMask: PrimCallCollectsProfileSamples)
+						ifTrue: [ceCallPrimitiveMayCallBackProfilingTrampoline]
+						ifFalse: [ceCallPrimitiveMayCallBackTrampoline])]
+				ifFalse:
+					[backEnd
+						genMarshallNArgs: 0 arg: 0 arg: 0 arg: 0 arg: 0;
+						genSubstituteReturnAddress:
+							((flags anyMask: PrimCallCollectsProfileSamples)
+								ifTrue: [cePrimReturnEnterCogCodeProfiling]
+								ifFalse: [cePrimReturnEnterCogCode]).
+					 primInvokeInstruction := self JumpFullRT: primitiveRoutine asInteger].
 			
 
 	(flags anyMask: PrimCallCollectsProfileSamples) ifTrue:
@@ -1906,7 +1921,7 @@ SimpleStackBasedCogit >> genPrimReturnEnterCogCodeEnilopmart: profiling [
 				ifFalse:
 					[self MoveMw: 0 r: SPReg R: ReceiverResultReg.						"Fetch result from stack"
 					 self MoveAw: coInterpreter instructionPointerAddress R: LinkReg.	"Get ret pc"
-					 self RetN: objectMemory wordSize]]								"Return, popping result from stack"
+					 self genGateReturnPopping: objectMemory wordSize]]				"Return, popping result from stack"
 		ifFalse:
 			[self MoveAw: coInterpreter instructionPointerAddress R: ClassReg.	"Get return pc"
 			 backEnd genLoadStackPointers.									"Switch back to Smalltalk stack."
@@ -1946,7 +1961,7 @@ SimpleStackBasedCogit >> genPrimReturnEnterCogCodeEnilopmart: profiling [
 		ifFalse:
 			[self MoveMw: objectMemory wordSize r: SPReg R: ReceiverResultReg.	"Fetch result from stack"
 			 self PushR: ClassReg].											"Restore return pc on CISCs"
-	self RetN: objectMemory wordSize.	"return to caller, popping receiver"
+	self genGateReturnPopping: objectMemory wordSize.	"return to caller, popping receiver"
 
 	profiling ifTrue:
 		["Call ceCheckProfileTick: to record sample and then continue.  newMethod
@@ -1978,6 +1993,29 @@ SimpleStackBasedCogit >> genPrimitiveCallGate [
 	self genRestoreLinkRegInGate.
 	self genGateReturn.
 	^ self jitDomainFinishGateAt: gate called: 'ceCallPrimitiveTrampoline' label: self jitDomainPrimLabel
+]
+
+{ #category : 'jitdomain' }
+SimpleStackBasedCogit >> genPrimitiveCallGateReturningThrough: primReturnEnilopmart called: trampolineName [
+
+	"Generate the gate through which machine code calls a C primitive that may call back, and answer its
+	 thunk. Machine code passes the primitive's slot in TempReg, as for genPrimitiveCallGate. The primitive
+	 returns into the gate, which continues in primReturnEnilopmart (cePrimReturnEnterCogCode), as the direct
+	 call did by substituting it as return address. The enilopmart returns to the thunk with domret:
+		domlpad 0, LBL_PRIM
+		call the function in the slot
+		j primReturnEnilopmart
+	 A call then a jump rather than a substituted return address: the same, as nothing looks at the
+	 primitive's return address."
+
+	<var: #trampolineName type: #'char *'>
+	<option: #JITDOMAIN>
+	| gate |
+	gate := methodZoneBase.
+	self jitDomainStartGate: self jitDomainPrimLabel.
+	self genCallPrimitiveInSlot: TempReg.
+	self JumpLong: primReturnEnilopmart.
+	^ self jitDomainFinishGateAt: gate called: trampolineName label: self jitDomainPrimLabel
 ]
 
 { #category : 'primitive generators' }
@@ -2911,10 +2949,17 @@ SimpleStackBasedCogit >> generateCheckProfileTickFromJump: arrivingJmp returning
 SimpleStackBasedCogit >> generateJitDomainPrimitiveGates [
 
 	"Generate the gates through which machine code calls C directly: the primitives (see
-	 compileInterpreterPrimitive:flags:), ceCheckProfileTick and the machine-code primitives"
+	 compileInterpreterPrimitive:flags:), ceCheckProfileTick and the machine-code primitives. Follows
+	 generateEnilopmarts, which generates cePrimReturnEnterCogCode."
 
 	<option: #JITDOMAIN>
 	ceCallPrimitiveTrampoline := self genPrimitiveCallGate.
+	ceCallPrimitiveMayCallBackTrampoline := self
+		genPrimitiveCallGateReturningThrough: cePrimReturnEnterCogCode
+		called: 'ceCallPrimitiveMayCallBackTrampoline'.
+	ceCallPrimitiveMayCallBackProfilingTrampoline := self
+		genPrimitiveCallGateReturningThrough: cePrimReturnEnterCogCodeProfiling
+		called: 'ceCallPrimitiveMayCallBackProfilingTrampoline'.
 	ceCheckProfileTickTrampoline := self
 		genCCallGateFor: self ceCheckProfileTickAddress
 		called: 'ceCheckProfileTickTrampoline'.
@@ -3362,7 +3407,7 @@ SimpleStackBasedCogit >> rewritePrimInvocationIn: cogMethod to: primFunctionPoin
 	<var: #cogMethod type: #'CogMethod *'>
 	<var: #primFunctionPointer declareC:
 	#'void (*primFunctionPointer)(void)'>
-	| primIndex flags address extent slotRewritten |
+	| primIndex flags address extent |
 	self cCode: [  ] inSmalltalk: [ 
 		primFunctionPointer isInteger ifFalse: [ 
 			^ self
@@ -3377,18 +3422,14 @@ SimpleStackBasedCogit >> rewritePrimInvocationIn: cogMethod to: primFunctionPoin
 		flags := self
 			         primitivePropertyFlags: primIndex
 			         primitiveDescriptor: self primitiveDescriptor.
-		"See compileInterpreterPrimitive:flags:. With JITDOMAIN a method that cannot call back passes its
-		 primitive's slot to the primitive gate: the slot is all there is to rewrite."
-		slotRewritten := false.
+		"See compileInterpreterPrimitive:flags:. With JITDOMAIN the method passes its primitive's slot to a
+		 primitive gate: the slot is all there is to rewrite."
 		self cppIf: JITDOMAIN ifTrue: [
-			(flags anyMask: PrimCallMayCallBack) ifFalse: [
-				address := cogMethod asUnsignedInteger + (externalSetPrimOffsets at: cogMethod cmNumArgs).
-				backEnd
-					storeLiteral: (self jitDomainPrimitiveSlotFor: primFunctionPointer asUnsignedInteger)
-					beforeFollowingAddress: address.
-				extent := 0.
-				slotRewritten := true ] ].
-		slotRewritten ifFalse: [
+			address := cogMethod asUnsignedInteger + (externalSetPrimOffsets at: cogMethod cmNumArgs).
+			backEnd
+				storeLiteral: (self jitDomainPrimitiveSlotFor: primFunctionPointer asUnsignedInteger)
+				beforeFollowingAddress: address.
+			extent := 0 ] ifFalse: [
 		(flags anyMask: PrimCallNeedsPrimitiveFunction) ifTrue: [
 			backEnd
 				storeLiteral: primFunctionPointer asUnsignedInteger

@@ -234,6 +234,34 @@ VMRISCV64JITDomainExitTest >> testGateReturnsThroughItsThunk [
 ]
 
 { #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testMayCallBackPrimitiveGateReturnsThroughTheEnilopmart [
+
+	"The gate calls the function in the slot, then jumps to the return enilopmart, which sets the link register
+	 to the method's return address and domrets to the thunk"
+
+	| function enilopmart thunk startToEnd |
+	function := self fakeCFunction: [ cogit MoveCq: 42 R: ReceiverResultReg ].
+	enilopmart := self gateWith: [
+		cogit zeroOpcodeIndex.
+		cogit MoveAw: interpreter instructionPointerAddress R: LinkReg.
+		cogit genGateReturn ].
+	cogit allocateOpcodes: 20 bytecodes: 0.
+	thunk := cogit genPrimitiveCallGateReturningThrough: enilopmart called: 'testPrimitiveMayCallBack'.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	startToEnd := self callThunk: thunk.
+	interpreter instructionPointer: startToEnd key + 8.
+	machineSimulator temporaryRegisterValue: (cogit jitDomainPrimitiveSlotFor: function).
+
+	self runFromTo: startToEnd.
+
+	self assert: machineSimulator receiverRegisterValue equals: 42.
+	self assert: machineSimulator classRegisterValue equals: 7.
+	self assert: interpreter primitiveFunctionPointer equals: function.
+	self assert: self hart drsDepth equals: 0.
+	self assert: (self hart events detect: [ :e | e first = #domcall ]) last equals: 2
+]
+
+{ #category : 'tests' }
 VMRISCV64JITDomainExitTest >> testPrimitiveGateCallsTheFunctionInItsSlot [
 
 	"The primitive gate calls the function in the slot machine code passes, not the one in
@@ -300,7 +328,8 @@ VMRISCV64JITDomainExitTest >> testRunTimeLayout [
 
 	#( 'ceSend0Args' 'ceSuperSendNArgs' 'ceMethodAbort1Args' 'cePICAbort2Args' 'cePICMissNArgs' 'ceStoreCheckTrampoline'
 	   'ceCheckForInterruptsTrampoline' 'ceReturnToInterpreterTrampoline' 'ceBaseFrameReturnTrampoline'
-	   'ceCallPrimitiveTrampoline' 'ceCheckProfileTickTrampoline' 'ceMcprimHashMultiplyTrampoline' ) do: [ :name |
+	   'ceCallPrimitiveTrampoline' 'ceCallPrimitiveMayCallBackTrampoline' 'ceCheckProfileTickTrampoline'
+	   'ceMcprimHashMultiplyTrampoline' ) do: [ :name |
 		| addresses |
 		addresses := self addressesNamed: name.
 		self assert: addresses size equals: 2.
