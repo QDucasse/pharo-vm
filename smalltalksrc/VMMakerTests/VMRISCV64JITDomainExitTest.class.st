@@ -49,7 +49,7 @@ VMRISCV64JITDomainExitTest >> assertPrimitiveGateStopsOnSlot: slot [
 	| function thunk startToEnd |
 	function := self fakeCFunction: [ cogit MoveCq: 42 R: ReceiverResultReg ].
 	cogit jitDomainPrimitiveSlotFor: function.
-	cogit allocateOpcodes: 40 bytecodes: 0.
+	cogit allocateOpcodes: 80 bytecodes: 0.
 	thunk := cogit genPrimitiveCallGate.
 	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
 	startToEnd := self callThunk: thunk.
@@ -86,6 +86,28 @@ VMRISCV64JITDomainExitTest >> callThunk: thunk [
 ]
 
 { #category : 'helpers' }
+VMRISCV64JITDomainExitTest >> callThunk: thunk withSP: sp fp: fp [
+
+	"Call thunk from machine code with the stack and frame pointers sp and fp. Answer true if the gate ran its
+	 C function, which sets ReceiverResultReg to 42, and false if it stopped at an ebreak first"
+
+	| startToEnd |
+	startToEnd := self callThunk: thunk.
+	machineSimulator
+		receiverRegisterValue: 0;
+		smalltalkStackPointerRegisterValue: sp;
+		framePointerRegisterValue: fp.
+	[ self runFromTo: startToEnd ]
+		on: UnicornError
+		do: [ :e |
+			self assert: (self wordAt: machineSimulator instructionPointerRegisterValue) equals: 16r00100073.
+			self assert: machineSimulator receiverRegisterValue equals: 0.
+			^ false ].
+	self assert: machineSimulator receiverRegisterValue equals: 42.
+	^ true
+]
+
+{ #category : 'helpers' }
 VMRISCV64JITDomainExitTest >> fakeCFunction: aBlock [
 
 	"Machine code standing for a C function: aBlock's code, then ret. Answer its address."
@@ -102,7 +124,7 @@ VMRISCV64JITDomainExitTest >> gateWith: aBlock [
 	"Generate a gate whose code aBlock generates, as generateTrampolines does, and answer its address"
 
 	| gate |
-	cogit allocateOpcodes: 40 bytecodes: 0.
+	cogit allocateOpcodes: 80 bytecodes: 0.
 	aBlock value.
 	gate := cogit methodZoneBase.
 	cogit outputInstructionsForGeneratedRuntimeAt: gate.
@@ -153,6 +175,12 @@ VMRISCV64JITDomainExitTest >> signed: aValue bits: aNumber [
 ]
 
 { #category : 'helpers' }
+VMRISCV64JITDomainExitTest >> stackPagesMiddle [
+
+	^ cogit getJitDomainStackZoneBottom + cogit getJitDomainStackZoneTop // 2 bitClear: 15
+]
+
+{ #category : 'helpers' }
 VMRISCV64JITDomainExitTest >> targetOfThunk: thunk [
 
 	"Decode the gate address of auipc/addi x5"
@@ -171,7 +199,7 @@ VMRISCV64JITDomainExitTest >> testCCallGatePassesArgumentsAndResult [
 	| function thunk start end |
 	function := self fakeCFunction: [
 		cogit AddCq: 1 R: cogit backEnd cResultRegister ].
-	cogit allocateOpcodes: 40 bytecodes: 0.
+	cogit allocateOpcodes: 80 bytecodes: 0.
 	thunk := cogit genCCallGateFor: function called: 'testCCall'.
 	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
 	start := self compile: [
@@ -195,7 +223,7 @@ VMRISCV64JITDomainExitTest >> testCCallGateReloadsVarBaseReg [
 
 	| function thunk start end |
 	function := self fakeCFunction: [ cogit MoveR: VarBaseReg R: ReceiverResultReg ].
-	cogit allocateOpcodes: 40 bytecodes: 0.
+	cogit allocateOpcodes: 80 bytecodes: 0.
 	thunk := cogit genCCallGateFor: function called: 'testCCall'.
 	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
 	start := self compile: [
@@ -216,7 +244,7 @@ VMRISCV64JITDomainExitTest >> testCCallGateRunsCOnTheCStack [
 
 	| function thunk start end smalltalkSP smalltalkFP |
 	function := self fakeCFunction: [ cogit MoveR: SPReg R: ReceiverResultReg ].
-	cogit allocateOpcodes: 40 bytecodes: 0.
+	cogit allocateOpcodes: 80 bytecodes: 0.
 	thunk := cogit genCCallGateFor: function called: 'testCCall'.
 	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
 	start := self compile: [
@@ -244,7 +272,7 @@ VMRISCV64JITDomainExitTest >> testCCallGateThatDoesNotReturnStopsIfTheFunctionRe
 
 	| function thunk startToEnd |
 	function := self fakeCFunction: [ cogit MoveCq: 42 R: ReceiverResultReg ].
-	cogit allocateOpcodes: 40 bytecodes: 0.
+	cogit allocateOpcodes: 80 bytecodes: 0.
 	thunk := cogit genCCallGateFor: function called: 'testCCall' returns: false.
 	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
 	startToEnd := self callThunk: thunk.
@@ -267,7 +295,7 @@ VMRISCV64JITDomainExitTest >> testCallThroughGatePassesArgumentsAndResult [
 	| function thunk startToEnd |
 	function := self fakeCFunction: [
 		cogit AddCq: 1 R: cogit backEnd cResultRegister ].
-	cogit allocateOpcodes: 40 bytecodes: 0.
+	cogit allocateOpcodes: 80 bytecodes: 0.
 	thunk := cogit genCCallGateFor: function called: 'testCCall'.
 	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
 	startToEnd := self compileWithEnd: [
@@ -355,6 +383,55 @@ VMRISCV64JITDomainExitTest >> testGateReturnsThroughItsThunk [
 ]
 
 { #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testGateStopsOnAFramePointerOutsideTheStackPages [
+
+	"The VM writes through framePointer, which the gate sets from the frame pointer it is entered with: it must
+	 lie in the stack pages, (bottom, top], or be 0 as on returning from a base frame"
+
+	| thunk bottom top sp |
+	cogit allocateOpcodes: 80 bytecodes: 0.
+	thunk := cogit
+		genCCallGateFor: (self fakeCFunction: [ cogit MoveCq: 42 R: ReceiverResultReg ])
+		called: 'testCCall'.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	bottom := cogit getJitDomainStackZoneBottom.
+	top := cogit getJitDomainStackZoneTop.
+	sp := self stackPagesMiddle.
+
+	self deny: (self callThunk: thunk withSP: sp fp: bottom).
+	self assert: (self callThunk: thunk withSP: sp fp: bottom + 8).
+	self assert: (self callThunk: thunk withSP: sp fp: top).
+	self deny: (self callThunk: thunk withSP: sp fp: top + 8).
+	self assert: (self callThunk: thunk withSP: sp fp: 0).
+	self deny: (self callThunk: thunk withSP: sp fp: cogit varBaseAddress)
+]
+
+{ #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testGateStopsOnAStackPointerOutsideTheStackPages [
+
+	"The VM writes through stackPointer, which the gate sets from the stack pointer it is entered with: it must
+	 lie in the stack pages, (bottom, top]"
+
+	| thunk bottom top fp |
+	cogit allocateOpcodes: 80 bytecodes: 0.
+	thunk := cogit
+		genCCallGateFor: (self fakeCFunction: [ cogit MoveCq: 42 R: ReceiverResultReg ])
+		called: 'testCCall'.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	bottom := cogit getJitDomainStackZoneBottom.
+	top := cogit getJitDomainStackZoneTop.
+	fp := self stackPagesMiddle.
+
+	self assert: bottom > 0.
+	self assert: top > bottom.
+	self deny: (self callThunk: thunk withSP: bottom fp: fp).
+	self assert: (self callThunk: thunk withSP: bottom + 8 fp: fp).
+	self assert: (self callThunk: thunk withSP: top fp: fp).
+	self deny: (self callThunk: thunk withSP: top + 8 fp: fp).
+	self deny: (self callThunk: thunk withSP: cogit getCStackPointer asInteger fp: fp)
+]
+
+{ #category : 'tests' }
 VMRISCV64JITDomainExitTest >> testMayCallBackPrimitiveGateReturnsThroughTheEnilopmart [
 
 	"The gate calls the function in the slot, then jumps to the return enilopmart, which switches back to the
@@ -367,7 +444,7 @@ VMRISCV64JITDomainExitTest >> testMayCallBackPrimitiveGateReturnsThroughTheEnilo
 		cogit backEnd genLoadStackPointers.
 		cogit MoveAw: interpreter instructionPointerAddress R: LinkReg.
 		cogit genGateReturn ].
-	cogit allocateOpcodes: 40 bytecodes: 0.
+	cogit allocateOpcodes: 80 bytecodes: 0.
 	thunk := cogit genPrimitiveCallGateReturningThrough: enilopmart called: 'testPrimitiveMayCallBack'.
 	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
 	startToEnd := self callThunk: thunk.
@@ -392,7 +469,7 @@ VMRISCV64JITDomainExitTest >> testPrimitiveGateCallsTheFunctionInItsSlot [
 	| function forged thunk startToEnd |
 	function := self fakeCFunction: [ cogit MoveCq: 42 R: ReceiverResultReg ].
 	forged := self fakeCFunction: [ cogit MoveCq: 13 R: ReceiverResultReg ].
-	cogit allocateOpcodes: 40 bytecodes: 0.
+	cogit allocateOpcodes: 80 bytecodes: 0.
 	thunk := cogit genPrimitiveCallGate.
 	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
 	interpreter primitiveFunctionPointer: forged.
@@ -422,7 +499,7 @@ VMRISCV64JITDomainExitTest >> testPrimitiveGateReturnsToTheStackThePrimitiveLeft
 		cogit MoveAw: cogit stackPointerAddress R: TempReg.
 		cogit AddCq: self wordSize R: TempReg.
 		cogit MoveR: TempReg Aw: cogit stackPointerAddress ].
-	cogit allocateOpcodes: 40 bytecodes: 0.
+	cogit allocateOpcodes: 80 bytecodes: 0.
 	thunk := cogit genPrimitiveCallGate.
 	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
 	startToEnd := self compileWithEnd: [ cogit CallRT: thunk ].
@@ -612,6 +689,34 @@ VMRISCV64JITDomainExitTest >> testTrampolineGateReloadsVarBaseReg [
 	self runFromTo: start -> end address.
 
 	self assert: machineSimulator receiverRegisterValue equals: cogit varBaseAddress
+]
+
+{ #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testTrampolineStopsOnStackPointersOutsideTheStackPages [
+
+	"Ordinary trampolines check the stack and frame pointers too, in genSmalltalkToCStackSwitch:. This one is
+	 built as compileTrampolineFor:… builds them: it pushes the link register first, and checks the stack
+	 pointer after the push"
+
+	| function thunk top middle |
+	function := self fakeCFunction: [ cogit MoveCq: 42 R: ReceiverResultReg ].
+	thunk := cogit
+		gateEntryFor: (self gateWith: [
+			cogit zeroOpcodeIndexForGate.
+			cogit genSmalltalkToCStackSwitch: true.
+			cogit CallFullRT: function.
+			cogit backEnd genLoadStackPointers.
+			cogit PopR: LinkReg.
+			cogit genGateReturn ])
+		called: 'testTrampoline'.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	top := cogit getJitDomainStackZoneTop.
+	middle := self stackPagesMiddle.
+
+	self assert: (self callThunk: thunk withSP: middle fp: middle).
+	self assert: (self callThunk: thunk withSP: top + 8 fp: middle).
+	self deny: (self callThunk: thunk withSP: top + 16 fp: middle).
+	self deny: (self callThunk: thunk withSP: middle fp: cogit getJitDomainStackZoneBottom)
 ]
 
 { #category : 'helpers' }

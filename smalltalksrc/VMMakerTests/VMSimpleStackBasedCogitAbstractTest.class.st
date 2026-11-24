@@ -881,7 +881,9 @@ VMSimpleStackBasedCogitAbstractTest >> setUp [
 	self initializeOldSpaceForScavenger.
 	self initializeStackMemory.
 	self initializeInitialStackFrame.
-	self jitDomain ifTrue: [ self setUpDomainReturnStack ]
+	self jitDomain ifTrue: [
+		self setUpDomainReturnStack.
+		interpreter captureJitDomainStackZone ]
 ]
 
 { #category : 'running' }

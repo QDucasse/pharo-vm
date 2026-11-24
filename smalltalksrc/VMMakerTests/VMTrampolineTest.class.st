@@ -289,35 +289,45 @@ VMTrampolineTest >> testSmalltalkToCStackShouldPushLinkRegister [
 { #category : 'tests' }
 VMTrampolineTest >> testSmalltalkToCStackSwitchShouldUpdateInterpreterFramePointer [
 	
+	| pointer |
 	self compile: [ cogit genSmalltalkToCStackSwitch: false "do not push link register" ].
+	"With JITDOMAIN the switch stops on a pointer outside the stack pages"
+	pointer := self jitDomain
+		ifTrue: [ cogit getJitDomainStackZoneTop - 64 ]
+		ifFalse: [ 42 ].
 	
 	"Initialize the state of the interpreter"
 	machineSimulator baseRegisterValue: cogit varBaseAddress.
 	self cogit setCStackPointer: 108.
 	self cogit setCFramePointer: 116.
-	self framePointerRegisterValue: 42.
+	self framePointerRegisterValue: pointer.
 
 	self runFrom: cogInitialAddress until: self getLastAddress.
 
 	"The generated code should load in the interpreter stackPointer the value stored in the SP register"
-	self assert: self interpreter framePointer equals: 42
+	self assert: self interpreter framePointer equals: pointer
 ]
 
 { #category : 'tests' }
 VMTrampolineTest >> testSmalltalkToCStackSwitchShouldUpdateInterpreterStackPointer [
 	
+	| pointer |
 	self compile: [ cogit genSmalltalkToCStackSwitch: false "do not push link register" ].
+	"With JITDOMAIN the switch stops on a pointer outside the stack pages"
+	pointer := self jitDomain
+		ifTrue: [ cogit getJitDomainStackZoneTop - 64 ]
+		ifFalse: [ 42 ].
 	
 	"Initialize the state of the interpreter"
 	machineSimulator baseRegisterValue: cogit varBaseAddress.
 	self cogit setCStackPointer: 108.
 	self cogit setCFramePointer: 116.
-	machineSimulator smalltalkStackPointerRegisterValue: 42.
+	machineSimulator smalltalkStackPointerRegisterValue: pointer.
 
 	self runFrom: cogInitialAddress until: self getLastAddress.
 
 	"The generated code should load in the interpreter stackPointer the value stored in the SP register"
-	self assert: self interpreter stackPointer equals: 42
+	self assert: self interpreter stackPointer equals: pointer
 ]
 
 { #category : 'tests' }

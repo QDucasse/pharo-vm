@@ -924,6 +924,20 @@ CoInterpreter >> callRegisterArgCogMethod: cogMethod at: entryOffset receiver: r
 	self unreachable
 ]
 
+{ #category : 'initialization' }
+CoInterpreter >> captureJitDomainStackZone [
+
+	"The stack pages are allocated: give their bounds to the gates, which stop if machine code calls them with a
+	 stack or frame pointer outside (see Cogit >> genCheckStackPointersInGate). A page's frames lie above its
+	 lastAddress, up to its baseAddress included."
+
+	<inline: true>
+	self cppIf: JITDOMAIN ifTrue: [
+		cogit
+			setJitDomainStackZoneBottom: (stackPages stackPageAt: 0) lastAddress
+			top: (stackPages stackPageAt: self numStkPages - 1) baseAddress ]
+]
+
 { #category : 'callback support' }
 CoInterpreter >> captureJitDomainUdspBase [
 

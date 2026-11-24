@@ -556,7 +556,8 @@ VMJITPrimitiveCallingTest >> testPrimitiveFailingDoesNotSetErrorCodeInOtherTemp 
 		isPrimitive: true;
 		buildMethod.
 
-	"Initialize the reap primitive code trampoline"
+	"Initialize the reap primitive code trampoline, with as many opcodes as generateTrampolines gives each"
+	cogit allocateOpcodes: 80 bytecodes: 0.
 	cogit generateMissAbortTrampolines.
 	sendTrampolineAddress := self compile: [ cogit RetN: 0 ].
 	cogit ordinarySendTrampolineAt: 0 "num args" put: sendTrampolineAddress.	
@@ -595,7 +596,8 @@ VMJITPrimitiveCallingTest >> testPrimitiveFailingSetsErrorCodeInCorrectTemp [
 		isPrimitive: true;
 		buildMethod.
 
-	"Initialize the reap primitive code trampoline"
+	"Initialize the reap primitive code trampoline, with as many opcodes as generateTrampolines gives each"
+	cogit allocateOpcodes: 80 bytecodes: 0.
 	cogit generateMissAbortTrampolines.
 	sendTrampolineAddress := self compile: [ cogit RetN: 0 ].
 	cogit ordinarySendTrampolineAt: 0 "num args" put: sendTrampolineAddress.	

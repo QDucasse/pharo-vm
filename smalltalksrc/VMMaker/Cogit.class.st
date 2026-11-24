@@ -207,6 +207,8 @@ Class {
 		'ceGetUdsp',
 		'ceResetUdsp',
 		'jitDomainUdspBase',
+		'jitDomainStackZoneBottom',
+		'jitDomainStackZoneTop',
 		'fixedCodeCursor',
 		'savedMethodZoneBase',
 		'ordinarySendTrampolines',
@@ -462,6 +464,8 @@ Cogit class >> declareCVarsIn: aCCodeGenerator [
 		var: #ceGetUdsp declareC: 'usqIntptr_t (*ceGetUdsp)(void)';
 		var: #ceResetUdsp declareC: 'void (*ceResetUdsp)(void)';
 		var: #jitDomainUdspBase type: #usqIntptr_t;
+		var: #jitDomainStackZoneBottom type: #usqIntptr_t;
+		var: #jitDomainStackZoneTop type: #usqIntptr_t;
 		var: #ceCaptureCStackPointers
 		declareC: 'void (*ceCaptureCStackPointers)(void)';
 		var: #ceEnterCogCodePopReceiverReg
@@ -6419,6 +6423,45 @@ Cogit >> gateEntryFor: gateAddress called: trampolineName [
 ]
 
 { #category : 'jitdomain' }
+Cogit >> genCheckStackPointersInGate [
+
+	"Machine code chose the stack and frame pointers a gate is entered with, and the gate stores them into
+	 stackPointer and framePointer, through which the VM then reads and writes frames and arguments with its
+	 own rights. Stop unless both lie in the stack pages, which machine code can write anyway:
+	 jitDomainStackZoneBottom < sp, fp <= jitDomainStackZoneTop. The frame pointer may also be 0, as on
+	 returning from a page's base frame (see ceBaseFrameReturn:). Uses RISCTempReg, which the thunk already
+	 clobbers with the gate's address:
+			ld   t, jitDomainStackZoneTop
+			bgtu sp, t, stop
+			bgtu fp, t, stop
+			ld   t, jitDomainStackZoneBottom
+			bleu sp, t, stop
+			bgtu fp, t, ok
+			beqz fp, ok
+		stop:
+			ebreak
+		ok:"
+
+	<option: #JITDOMAIN>
+	| jumpSPAbove jumpFPAbove jumpSPBelow jumpFPIn jumpFPZero |
+	self MoveAw: self jitDomainStackZoneTopAddress R: RISCTempReg.
+	self CmpR: RISCTempReg R: SPReg.
+	jumpSPAbove := self JumpAbove: 0.
+	self CmpR: RISCTempReg R: FPReg.
+	jumpFPAbove := self JumpAbove: 0.
+	self MoveAw: self jitDomainStackZoneBottomAddress R: RISCTempReg.
+	self CmpR: RISCTempReg R: SPReg.
+	jumpSPBelow := self JumpBelowOrEqual: 0.
+	self CmpR: RISCTempReg R: FPReg.
+	jumpFPIn := self JumpAbove: 0.
+	self CmpCq: 0 R: FPReg.
+	jumpFPZero := self JumpZero: 0.
+	jumpSPAbove jmpTarget: (jumpFPAbove jmpTarget: (jumpSPBelow jmpTarget: self Stop)).
+	jumpFPIn jmpTarget: (jumpFPZero jmpTarget: self Label).
+	^ 0
+]
+
+{ #category : 'jitdomain' }
 Cogit >> genGatePad: label [
 
 	<option: #JITDOMAIN>
@@ -7125,6 +7168,8 @@ Cogit >> genSmalltalkToCStackSwitch: pushLinkReg [
 	 be pushed to the stack so that the interpreter sees the same stack layout as on CISC."
 	(backEnd hasLinkRegister and: [pushLinkReg]) ifTrue:
 		[self PushR: LinkReg].
+	"With JITDOMAIN this runs in a gate, on the stack and frame pointers machine code chose"
+	self cppIf: JITDOMAIN ifTrue: [self genCheckStackPointersInGate].
 	backEnd genSaveStackPointers.
 	cFramePointerInUse
 		ifTrue: [backEnd genLoadCStackPointers]
@@ -8081,6 +8126,26 @@ Cogit >> getIsObjectReference [
 ]
 
 { #category : 'jitdomain' }
+Cogit >> getJitDomainStackZoneBottom [
+
+	"Just below the lowest stack page (see genCheckStackPointersInGate)"
+
+	<api>
+	<returnTypeC: #usqIntptr_t>
+	^ jitDomainStackZoneBottom
+]
+
+{ #category : 'jitdomain' }
+Cogit >> getJitDomainStackZoneTop [
+
+	"The base, highest address, of the highest stack page (see genCheckStackPointersInGate)"
+
+	<api>
+	<returnTypeC: #usqIntptr_t>
+	^ jitDomainStackZoneTop
+]
+
+{ #category : 'jitdomain' }
 Cogit >> getJitDomainUdspBase [
 
 	"The value the enilopmarts write into udsp: the Domain Return Stack pointer when the VM last
@@ -8828,6 +8893,24 @@ Cogit >> jitDomainResetUdsp [
 	self
 		cCode: [ self ceResetUdsp ]
 		inSmalltalk: [ self simulateLeafCallOf: ceResetUdsp ]
+]
+
+{ #category : 'jitdomain' }
+Cogit >> jitDomainStackZoneBottomAddress [
+
+	<returnTypeC: #usqInt>
+	^ self
+		cCode: [ (self addressOf: jitDomainStackZoneBottom) asUnsignedInteger ]
+		inSmalltalk: [ self simulatedReadWriteVariableAddress: #getJitDomainStackZoneBottom in: self ]
+]
+
+{ #category : 'jitdomain' }
+Cogit >> jitDomainStackZoneTopAddress [
+
+	<returnTypeC: #usqInt>
+	^ self
+		cCode: [ (self addressOf: jitDomainStackZoneTop) asUnsignedInteger ]
+		inSmalltalk: [ self simulatedReadWriteVariableAddress: #getJitDomainStackZoneTop in: self ]
 ]
 
 { #category : 'jitdomain' }
@@ -11687,10 +11770,23 @@ Cogit >> setInterpreter: aCoInterpreter [
 		                       (Array new: NumTrampolines * 4).
 	trampolineTableIndex := 0.
 	jitDomainUdspBase := 0.
+	jitDomainStackZoneBottom := jitDomainStackZoneTop := 0.
 
 	extA := numExtB := extB := 0.
 
 	compilationTrace ifNil: [compilationTrace := self class initializationOptions at: #compilationTrace ifAbsent: [0]]
+]
+
+{ #category : 'jitdomain' }
+Cogit >> setJitDomainStackZoneBottom: bottom top: top [
+
+	"Record the stack pages' bounds for the gates (see genCheckStackPointersInGate)"
+
+	<api>
+	<var: #bottom type: #usqIntptr_t>
+	<var: #top type: #usqIntptr_t>
+	jitDomainStackZoneBottom := bottom.
+	jitDomainStackZoneTop := top
 ]
 
 { #category : 'jitdomain' }

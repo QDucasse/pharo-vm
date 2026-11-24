@@ -3710,6 +3710,14 @@ StackInterpreter >> cannotAssign: resultObj to: targetObj withIndex: index [
 	^ self normalSend
 ]
 
+{ #category : 'initialization' }
+StackInterpreter >> captureJitDomainStackZone [
+
+	"The stack pages are allocated. Only the JIT has something to do: see CoInterpreter"
+
+	<inline: true>
+]
+
 { #category : 'callback support' }
 StackInterpreter >> captureJitDomainUdspBase [
 
@@ -7474,6 +7482,7 @@ StackInterpreter >> initStackPages [
 StackInterpreter >> initStackPagesAndInterpret [
 
 	self initStackPages.
+	self captureJitDomainStackZone.
 	
 	"Once the stack pages are initialized we can continue to bootstrap the system."
 	self loadInitialContext.
