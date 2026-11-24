@@ -2562,6 +2562,18 @@ CoInterpreter >> flushExternalPrimitiveOf: methodObj [
 			to: #primitiveExternalCall]
 ]
 
+{ #category : 'plugin primitive support' }
+CoInterpreter >> flushExternalPrimitiveTable [
+	"Override to also empty the primitive gates' slots of the functions being unlinked"
+	self cppIf: JITDOMAIN ifTrue: [
+		0 to: MaxExternalPrimitiveTableSize - 1 do: [ :i |
+			(externalPrimitiveTable at: i) ~= 0 ifTrue: [
+				cogit jitDomainForgetPrimitiveFunction: (self
+					cCode: [ (externalPrimitiveTable at: i) asUnsignedInteger ]
+					inSmalltalk: [ externalPrimitiveTable at: i ]) ] ] ].
+	super flushExternalPrimitiveTable
+]
+
 { #category : 'message sending' }
 CoInterpreter >> followForwardedFieldsInCurrentMethod [
 

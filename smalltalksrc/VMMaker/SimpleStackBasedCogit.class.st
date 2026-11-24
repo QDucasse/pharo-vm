@@ -8,6 +8,8 @@ Class {
 		'primitiveGeneratorTable',
 		'ceCheckProfileTickTrampoline',
 		'ceMcprimHashMultiplyTrampoline',
+		'jitDomainPrimitiveFunctions',
+		'jitDomainPrimitiveSlotsInUse',
 		'primSetFunctionLabel',
 		'primInvokeInstruction',
 		'externalPrimCallOffsets',
@@ -68,6 +70,9 @@ SimpleStackBasedCogit class >> declareCVarsIn: aCCodeGenerator [
 			declareC: 'sqInt externalPrimJumpOffsets[MaxNumArgs + 1]';
 		var: #externalSetPrimOffsets
 			declareC: 'sqInt externalSetPrimOffsets[MaxNumArgs + 1]';
+		"The size is jitDomainPrimitiveSlots"
+		var: #jitDomainPrimitiveFunctions
+			declareC: 'static usqInt jitDomainPrimitiveFunctions[5120]';
 		var: #primSetFunctionLabel type: #'AbstractInstruction *';
 		var: #primInvokeInstruction type: #'AbstractInstruction *'
 ]
@@ -2895,10 +2900,89 @@ SimpleStackBasedCogit >> generateTracingTrampolines [
 			regsToSave: CallerSavedRegisterMask.
 ]
 
+{ #category : 'simulation only' }
+SimpleStackBasedCogit >> initializeProcessor [
+
+	"Give jitDomainPrimitiveFunctions simulated memory first, so that the processor maps it with the rest"
+
+	<doNotGenerate>
+	jitDomainPrimitiveFunctions := CArrayOfLongsAccessor new
+		objectMemory: objectMemory
+		at: (objectMemory memoryManager allocate: self jitDomainPrimitiveSlots * objectMemory wordSize).
+	jitDomainPrimitiveSlotsInUse := 0.
+	super initializeProcessor
+]
+
 { #category : 'register management' }
 SimpleStackBasedCogit >> isCallerSavedReg: reg [
 	<inline: true>
 	^self register: reg isInMask: CallerSavedRegisterMask
+]
+
+{ #category : 'jitdomain' }
+SimpleStackBasedCogit >> jitDomainForgetPrimitiveFunction: function [
+
+	"Empty the slot of function, an external primitive the VM is unlinking, so that a forged slot cannot call it
+	 once its plugin is unloaded. No method passes that slot any more: flushExternalPrimitives has rewritten
+	 them all first."
+
+	<api>
+	<option: #JITDOMAIN>
+	<var: #function type: #usqInt>
+	| address |
+	address := self
+		cCode: [ function ]
+		inSmalltalk: [ function isInteger ifTrue: [ function ] ifFalse: [ self simulatedTrampolineFor: function ] ].
+	0 to: jitDomainPrimitiveSlotsInUse - 1 do: [ :slot |
+		(jitDomainPrimitiveFunctions at: slot) = address ifTrue: [
+			jitDomainPrimitiveFunctions at: slot put: 0 ] ]
+]
+
+{ #category : 'jitdomain' }
+SimpleStackBasedCogit >> jitDomainPrimitiveFunctionsAddress [
+
+	"The table of the functions the primitive gates call, indexed by slot (see jitDomainPrimitiveSlotFor:). It is
+	 VM data, which machine code cannot write."
+
+	<option: #JITDOMAIN>
+	<returnTypeC: #usqInt>
+	^ self
+		cCode: [ jitDomainPrimitiveFunctions asUnsignedInteger ]
+		inSmalltalk: [ jitDomainPrimitiveFunctions address ]
+]
+
+{ #category : 'jitdomain' }
+SimpleStackBasedCogit >> jitDomainPrimitiveSlotFor: function [
+
+	"Answer the slot of jitDomainPrimitiveFunctions that holds function, putting it in the first empty slot, or a
+	 new one, if none does yet. A method passes its primitive's slot to the primitive gate, never the function:
+	 whatever slot machine code forges, it can only call a function the VM put in the table."
+
+	<option: #JITDOMAIN>
+	<var: #function type: #usqInt>
+	| empty |
+	empty := -1.
+	0 to: jitDomainPrimitiveSlotsInUse - 1 do: [ :slot |
+		(jitDomainPrimitiveFunctions at: slot) = function ifTrue: [ ^ slot ].
+		(empty < 0 and: [ (jitDomainPrimitiveFunctions at: slot) = 0 ]) ifTrue: [ empty := slot ] ].
+	empty < 0 ifTrue: [
+		jitDomainPrimitiveSlotsInUse >= self jitDomainPrimitiveSlots ifTrue: [
+			self error: 'jitDomainPrimitiveFunctions is full' ].
+		empty := jitDomainPrimitiveSlotsInUse.
+		jitDomainPrimitiveSlotsInUse := jitDomainPrimitiveSlotsInUse + 1 ].
+	jitDomainPrimitiveFunctions at: empty put: function.
+	^ empty
+]
+
+{ #category : 'jitdomain' }
+SimpleStackBasedCogit >> jitDomainPrimitiveSlots [
+
+	"The capacity of jitDomainPrimitiveFunctions (also in declareCVarsIn:). It holds every numbered primitive
+	 (MaxPrimitiveIndex + 1), every linked external primitive (MaxExternalPrimitiveTableSize) and the few
+	 functions a method is rewritten to."
+
+	<inline: true>
+	^ 5120
 ]
 
 { #category : 'method introspection' }

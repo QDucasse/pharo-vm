@@ -209,6 +209,21 @@ VMRISCV64JITDomainExitTest >> testGateReturnsThroughItsThunk [
 ]
 
 { #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testPrimitiveSlotsAreSharedAndReused [
+
+	"A function keeps its slot, and the slot of a forgotten function goes to the next new one"
+
+	| first second |
+	first := cogit jitDomainPrimitiveSlotFor: 16r1000.
+	self assert: (cogit jitDomainPrimitiveSlotFor: 16r1000) equals: first.
+	second := cogit jitDomainPrimitiveSlotFor: 16r2000.
+	self deny: second equals: first.
+	cogit jitDomainForgetPrimitiveFunction: 16r1000.
+	self assert: (cogit jitDomainPrimitiveSlotFor: 16r3000) equals: first.
+	self assert: (cogit jitDomainPrimitiveSlotFor: 16r2000) equals: second
+]
+
+{ #category : 'tests' }
 VMRISCV64JITDomainExitTest >> testRunTimeLayout [
 
 	"Gates below the fixed code area, their thunks and the helpers in it, the method zone after it"
