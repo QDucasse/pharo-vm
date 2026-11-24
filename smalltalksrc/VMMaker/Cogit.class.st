@@ -6440,6 +6440,19 @@ Cogit >> genGateReturnPopping: numBytes [
 ]
 
 { #category : 'jitdomain' }
+Cogit >> genReloadVarBaseRegInGate [
+
+	"Machine code chose every register a gate is entered with, VarBaseReg included. A gate reaches the VM
+	 globals near varBaseAddress relative to VarBaseReg (see isAddressRelativeToVarBase:), so with the
+	 register machine code left, it would read and write them wherever machine code pointed it, with the
+	 VM's rights. Reload it first, as the enilopmarts do. Machine code keeps the same value on return."
+
+	<option: #JITDOMAIN>
+	backEnd hasVarBaseRegister ifTrue: [ self MoveCq: self varBaseAddress R: VarBaseReg ].
+	^ 0
+]
+
+{ #category : 'jitdomain' }
 Cogit >> genRestoreLinkRegInGate [
 
 	"See genSaveLinkRegInGate"
@@ -8791,6 +8804,7 @@ Cogit >> jitDomainStartGate: label [
 	<option: #JITDOMAIN>
 	self zeroOpcodeIndex.
 	self genGatePad: label.
+	self genReloadVarBaseRegInGate.
 	^ 0
 ]
 
@@ -12440,7 +12454,9 @@ Cogit >> zeroOpcodeIndexForGate [
 	"Start a trampoline. With JITDOMAIN it is a gate, whose first instruction is its landing pad"
 
 	self zeroOpcodeIndex.
-	self cppIf: JITDOMAIN ifTrue: [ self genGatePad ]
+	self cppIf: JITDOMAIN ifTrue: [
+		self genGatePad.
+		self genReloadVarBaseRegInGate ]
 ]
 
 { #category : 'accessing' }

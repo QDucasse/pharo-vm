@@ -188,6 +188,27 @@ VMRISCV64JITDomainExitTest >> testCCallGatePassesArgumentsAndResult [
 ]
 
 { #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testCCallGateReloadsVarBaseReg [
+
+	"Machine code aims VarBaseReg elsewhere before calling a gate that starts with jitDomainStartGate:. The
+	 gate reloads it before addressing any VM global: the C function finds varBaseAddress"
+
+	| function thunk start end |
+	function := self fakeCFunction: [ cogit MoveR: VarBaseReg R: ReceiverResultReg ].
+	cogit allocateOpcodes: 20 bytecodes: 0.
+	thunk := cogit genCCallGateFor: function called: 'testCCall'.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	start := self compile: [
+		cogit MoveCq: 16r1000 R: VarBaseReg.
+		cogit CallRT: thunk.
+		end := cogit Label ] bytecodes: 10.
+
+	self runFromTo: start -> end address.
+
+	self assert: machineSimulator receiverRegisterValue equals: cogit varBaseAddress
+]
+
+{ #category : 'tests' }
 VMRISCV64JITDomainExitTest >> testCallThroughGatePassesArgumentsAndResult [
 
 	"compileCallThroughGate:… marshals the arguments as compileCallFor:… does, calls the thunk and fetches the
@@ -489,6 +510,29 @@ VMRISCV64JITDomainExitTest >> compileWithEnd: aBlock [
 	| start end |
 	start := self compile: [ aBlock value. end := cogit Label ] bytecodes: 10.
 	^ start -> end address
+]
+
+{ #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testTrampolineGateReloadsVarBaseReg [
+
+	"Machine code aims VarBaseReg elsewhere before calling a gate that starts with zeroOpcodeIndexForGate,
+	 as every trampoline does. The gate reloads it right after its pad"
+
+	| gate thunk start end |
+	gate := self gateWith: [
+		cogit zeroOpcodeIndexForGate.
+		cogit MoveR: VarBaseReg R: ReceiverResultReg.
+		cogit genGateReturn ].
+	thunk := cogit gateEntryFor: gate called: 'testGate'.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	start := self compile: [
+		cogit MoveCq: 16r1000 R: VarBaseReg.
+		cogit CallRT: thunk.
+		end := cogit Label ] bytecodes: 10.
+
+	self runFromTo: start -> end address.
+
+	self assert: machineSimulator receiverRegisterValue equals: cogit varBaseAddress
 ]
 
 { #category : 'helpers' }
