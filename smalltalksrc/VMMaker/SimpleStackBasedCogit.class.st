@@ -529,11 +529,15 @@ SimpleStackBasedCogit >> compileInterpreterPrimitive: primitiveRoutine flags: fl
 		[self MoveCq: methodOrBlockNumArgs R: TempReg].
 	self MoveR: TempReg Aw: coInterpreter argumentCountAddress.
 
-	"If required, set primitiveFunctionPointer and newMethod"
+	"If required, set primitiveFunctionPointer and newMethod. With JITDOMAIN the primitive gate sets
+	 primitiveFunctionPointer (see genCallPrimitiveInSlot:)"
 	(flags anyMask: PrimCallNeedsPrimitiveFunction) ifTrue:
-		[self MoveCw: primitiveRoutine asInteger R: TempReg.
-		 primSetFunctionLabel :=
-		 self MoveR: TempReg Aw: coInterpreter primitiveFunctionPointerAddress].
+		[self cppIf: JITDOMAIN
+			ifTrue: []
+			ifFalse:
+				[self MoveCw: primitiveRoutine asInteger R: TempReg.
+				 primSetFunctionLabel :=
+				 self MoveR: TempReg Aw: coInterpreter primitiveFunctionPointerAddress]].
 	(flags anyMask: PrimCallNeedsNewMethod+PrimCallMayCallBack) ifTrue:
 		["The ceActivateFailingPrimitiveMethod: machinery can't handle framelessness."
 		 (flags anyMask: PrimCallMayCallBack) ifTrue:
@@ -549,7 +553,13 @@ SimpleStackBasedCogit >> compileInterpreterPrimitive: primitiveRoutine flags: fl
 
 	"Call the C primitive routine."
 	backEnd genMarshallNArgs: 0 arg: 0 arg: 0 arg: 0 arg: 0.
-	primInvokeInstruction := self CallFullRT: primitiveRoutine asInteger.
+	self cppIf: JITDOMAIN
+		ifTrue: [
+			"Pass the primitive's slot, the primitive gate calls the function the VM put there. The slot is the
+			 literal rewritePrimInvocationIn:to: rewrites, so it must not be shared."
+			self MoveUniqueCw: (self jitDomainPrimitiveSlotFor: primitiveRoutine asUnsignedInteger) R: TempReg.
+			primSetFunctionLabel := primInvokeInstruction := self CallRT: ceCallPrimitiveTrampoline ]
+		ifFalse: [ primInvokeInstruction := self CallFullRT: primitiveRoutine asInteger ].
 	backEnd genRemoveNArgsFromStack: 0.
 	(flags anyMask: PrimCallCollectsProfileSamples) ifTrue:
 		[self assert: (flags anyMask: PrimCallNeedsNewMethod).
@@ -3352,7 +3362,7 @@ SimpleStackBasedCogit >> rewritePrimInvocationIn: cogMethod to: primFunctionPoin
 	<var: #cogMethod type: #'CogMethod *'>
 	<var: #primFunctionPointer declareC:
 	#'void (*primFunctionPointer)(void)'>
-	| primIndex flags address extent |
+	| primIndex flags address extent slotRewritten |
 	self cCode: [  ] inSmalltalk: [ 
 		primFunctionPointer isInteger ifFalse: [ 
 			^ self
@@ -3367,12 +3377,23 @@ SimpleStackBasedCogit >> rewritePrimInvocationIn: cogMethod to: primFunctionPoin
 		flags := self
 			         primitivePropertyFlags: primIndex
 			         primitiveDescriptor: self primitiveDescriptor.
-		(flags anyMask: PrimCallNeedsPrimitiveFunction) ifTrue: [ 
+		"See compileInterpreterPrimitive:flags:. With JITDOMAIN a method that cannot call back passes its
+		 primitive's slot to the primitive gate: the slot is all there is to rewrite."
+		slotRewritten := false.
+		self cppIf: JITDOMAIN ifTrue: [
+			(flags anyMask: PrimCallMayCallBack) ifFalse: [
+				address := cogMethod asUnsignedInteger + (externalSetPrimOffsets at: cogMethod cmNumArgs).
+				backEnd
+					storeLiteral: (self jitDomainPrimitiveSlotFor: primFunctionPointer asUnsignedInteger)
+					beforeFollowingAddress: address.
+				extent := 0.
+				slotRewritten := true ] ].
+		slotRewritten ifFalse: [
+		(flags anyMask: PrimCallNeedsPrimitiveFunction) ifTrue: [
 			backEnd
 				storeLiteral: primFunctionPointer asUnsignedInteger
 				beforeFollowingAddress: cogMethod asUnsignedInteger
 					+ (externalSetPrimOffsets at: cogMethod cmNumArgs) ].
-		"See compileInterpreterPrimitive:"
 		(flags anyMask: PrimCallMayCallBack)
 			ifTrue: [ 
 				address := cogMethod asUnsignedInteger
@@ -3385,7 +3406,7 @@ SimpleStackBasedCogit >> rewritePrimInvocationIn: cogMethod to: primFunctionPoin
 				           + (externalPrimCallOffsets at: cogMethod cmNumArgs).
 				extent := backEnd
 					          rewriteCallFullAt: address
-					          target: primFunctionPointer asUnsignedInteger ]]
+					          target: primFunctionPointer asUnsignedInteger ]]]
 	 flushingCacheWith: [ 
 		self
 			flushICacheFrom: cogMethod asUnsignedInteger + cmNoCheckEntryOffset
