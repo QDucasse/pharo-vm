@@ -76,6 +76,16 @@ VMSimpleStackBasedCogitMegamorphicPICTest >> testMiss [
 	self assert: machineSimulator sendNumberOfArgumentsRegisterValue equals: createdPic address
 ]
 
+{ #category : 'tests - PIC' }
+VMSimpleStackBasedCogitMegamorphicPICTest >> testMissCallsCThroughAGate [
+
+	"Under JITDOMAIN the miss reaches ceSendFromInLineCacheMiss: through its gate, not directly"
+
+	self jitDomain ifFalse: [ ^ self skip ].
+	self testMiss.
+	self assertDomainCallThrough: (cogit instVarNamed: 'ceSendFromInLineCacheMissTrampoline')
+]
+
 { #category : 'tests - metadata' }
 VMSimpleStackBasedCogitMegamorphicPICTest >> testNewMegamorphicICHasTheCorrectPicAbortTrampoline [
 

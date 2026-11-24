@@ -3116,15 +3116,27 @@ CogObjectRepresentationForSpur >> maybeCompileRetryOnPrimitiveFail: primIndex [
 				MoveAw: coInterpreter primFailCodeAddress R: TempReg;
 				CmpCq: PrimErrNoMemory R: TempReg;
 				JumpNonZero: 0].
-	cogit
-		compileCallFor: #ceCheckAndMaybeRetryPrimitive:
-		numArgs: 1
-		arg: (cogit trampolineArgConstant: primIndex)
-		arg: nil
-		arg: nil
-		arg: nil
-		resultReg: TempReg
-		regsToSave: cogit emptyRegisterMask.
+	self cppIf: JITDOMAIN
+		ifTrue:
+			[cogit
+				compileCallThroughGate: cogit ceCheckAndMaybeRetryPrimitiveTrampoline
+				numArgs: 1
+				arg: (cogit trampolineArgConstant: primIndex)
+				arg: nil
+				arg: nil
+				arg: nil
+				resultReg: TempReg
+				regsToSave: cogit emptyRegisterMask]
+		ifFalse:
+			[cogit
+				compileCallFor: #ceCheckAndMaybeRetryPrimitive:
+				numArgs: 1
+				arg: (cogit trampolineArgConstant: primIndex)
+				arg: nil
+				arg: nil
+				arg: nil
+				resultReg: TempReg
+				regsToSave: cogit emptyRegisterMask].
 	jmp jmpTarget: cogit Label.
 	^0
 ]

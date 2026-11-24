@@ -379,7 +379,8 @@ VMRISCV64JITDomainExitTest >> testRunTimeLayout [
 	#( 'ceSend0Args' 'ceSuperSendNArgs' 'ceMethodAbort1Args' 'cePICAbort2Args' 'cePICMissNArgs' 'ceStoreCheckTrampoline'
 	   'ceCheckForInterruptsTrampoline' 'ceReturnToInterpreterTrampoline' 'ceBaseFrameReturnTrampoline'
 	   'ceCallPrimitiveTrampoline' 'ceCallPrimitiveMayCallBackTrampoline' 'ceCheckProfileTickTrampoline'
-	   'ceMcprimHashMultiplyTrampoline' ) do: [ :name |
+	   'ceMcprimHashMultiplyTrampoline' 'ceCheckAndMaybeRetryPrimitiveTrampoline'
+	   'ceSendFromInLineCacheMissTrampoline' ) do: [ :name |
 		| addresses |
 		addresses := self addressesNamed: name.
 		self assert: addresses size equals: 2.

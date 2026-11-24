@@ -812,6 +812,16 @@ VMJITPrimitiveCallingTest >> testPrimitiveIsNotTracedIfNotCalled [
 
 ]
 
+{ #category : 'tests - retry primitive' }
+VMJITPrimitiveCallingTest >> testPrimitiveRetryCallsCThroughAGate [
+
+	"Under JITDOMAIN the retry reaches ceCheckAndMaybeRetryPrimitive: through its gate, not directly"
+
+	self jitDomain ifFalse: [ ^ self skip ].
+	self testPrimitiveFailingWithAccessorDepthWithForwardersDoesRetry.
+	self assertDomainCallThrough: (cogit instVarNamed: 'ceCheckAndMaybeRetryPrimitiveTrampoline')
+]
+
 { #category : 'tests - fail fast' }
 VMJITPrimitiveCallingTest >> testPrimitiveWithPrimitiveFailExecutesFallbackCode [
 

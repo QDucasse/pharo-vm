@@ -9,8 +9,10 @@ Class {
 		'ceCallPrimitiveTrampoline',
 		'ceCallPrimitiveMayCallBackTrampoline',
 		'ceCallPrimitiveMayCallBackProfilingTrampoline',
+		'ceCheckAndMaybeRetryPrimitiveTrampoline',
 		'ceCheckProfileTickTrampoline',
 		'ceMcprimHashMultiplyTrampoline',
+		'ceSendFromInLineCacheMissTrampoline',
 		'jitDomainPrimitiveFunctions',
 		'jitDomainPrimitiveSlotsInUse',
 		'primSetFunctionLabel',
@@ -271,6 +273,16 @@ SimpleStackBasedCogit >> bytecodeFixupClass [
 SimpleStackBasedCogit >> bytecodePC: anInteger [ 
 	<doNotGenerate>
 	bytecodePC := anInteger 
+]
+
+{ #category : 'jitdomain' }
+SimpleStackBasedCogit >> ceCheckAndMaybeRetryPrimitiveTrampoline [
+
+	"The thunk of the gate that calls ceCheckAndMaybeRetryPrimitive: (see maybeCompileRetryOnPrimitiveFail:)"
+
+	<option: #JITDOMAIN>
+	<inline: true>
+	^ ceCheckAndMaybeRetryPrimitiveTrampoline
 ]
 
 { #category : 'jitdomain' }
@@ -856,15 +868,27 @@ SimpleStackBasedCogit >> compileMegamorphicIC: selector numArgs: numArgs [
 		[backEnd genPushRegisterArgsForNumArgs: numArgs scratchReg: SendNumArgsReg].
 	self genSmalltalkToCStackSwitch: true.
 	methodLabel addDependent: (self annotateAbsolutePCRef: (self MoveCw: methodLabel asInteger R: SendNumArgsReg)).
-	self 
-		compileCallFor: #ceSendFromInLineCacheMiss:
-		numArgs: 1
-		arg: SendNumArgsReg
-		arg: nil
-		arg: nil
-		arg: nil
-		resultReg: NoReg
-		regsToSave: self emptyRegisterMask
+	self cppIf: JITDOMAIN
+		ifTrue:
+			[self
+				compileCallThroughGate: ceSendFromInLineCacheMissTrampoline
+				numArgs: 1
+				arg: SendNumArgsReg
+				arg: nil
+				arg: nil
+				arg: nil
+				resultReg: NoReg
+				regsToSave: self emptyRegisterMask]
+		ifFalse:
+			[self 
+				compileCallFor: #ceSendFromInLineCacheMiss:
+				numArgs: 1
+				arg: SendNumArgsReg
+				arg: nil
+				arg: nil
+				arg: nil
+				resultReg: NoReg
+				regsToSave: self emptyRegisterMask]
 	"Note that this call does not return."
 ]
 
@@ -2949,8 +2973,9 @@ SimpleStackBasedCogit >> generateCheckProfileTickFromJump: arrivingJmp returning
 SimpleStackBasedCogit >> generateJitDomainPrimitiveGates [
 
 	"Generate the gates through which machine code calls C directly: the primitives (see
-	 compileInterpreterPrimitive:flags:), ceCheckProfileTick and the machine-code primitives. Follows
-	 generateEnilopmarts, which generates cePrimReturnEnterCogCode."
+	 compileInterpreterPrimitive:flags:), ceCheckProfileTick, the machine-code primitives, the primitive retry
+	 (see maybeCompileRetryOnPrimitiveFail:) and the megamorphic IC miss (see compileMegamorphicIC:numArgs:).
+	 Follows generateEnilopmarts, which generates cePrimReturnEnterCogCode."
 
 	<option: #JITDOMAIN>
 	ceCallPrimitiveTrampoline := self genPrimitiveCallGate.
@@ -2967,7 +2992,17 @@ SimpleStackBasedCogit >> generateJitDomainPrimitiveGates [
 		genCCallGateFor: (self
 			cCoerceSimple: (coInterpreter mcprimFunctionForPrimitiveIndex: PrimNumberHashMultiply)
 			to: #'void (*)(void)') asInteger
-		called: 'ceMcprimHashMultiplyTrampoline'
+		called: 'ceMcprimHashMultiplyTrampoline'.
+	ceCheckAndMaybeRetryPrimitiveTrampoline := self
+		genCCallGateFor: (self
+			cCode: [ #ceCheckAndMaybeRetryPrimitive: asUnsignedIntegerPtr ]
+			inSmalltalk: [ self simulatedTrampolineFor: #ceCheckAndMaybeRetryPrimitive: ])
+		called: 'ceCheckAndMaybeRetryPrimitiveTrampoline'.
+	ceSendFromInLineCacheMissTrampoline := self
+		genCCallGateFor: (self
+			cCode: [ #ceSendFromInLineCacheMiss: asUnsignedIntegerPtr ]
+			inSmalltalk: [ self simulatedTrampolineFor: #ceSendFromInLineCacheMiss: ])
+		called: 'ceSendFromInLineCacheMissTrampoline'
 ]
 
 { #category : 'initialization' }
