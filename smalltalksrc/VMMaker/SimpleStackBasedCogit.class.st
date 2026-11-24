@@ -1201,6 +1201,17 @@ SimpleStackBasedCogit >> genBlockReturn [
 { #category : 'jitdomain' }
 SimpleStackBasedCogit >> genCCallGateFor: aRoutine called: trampolineName [
 
+	"Generate a gate that calls the C routine aRoutine and returns, and answer its thunk (see
+	 genCCallGateFor:called:returns:)"
+
+	<var: #trampolineName type: #'char *'>
+	<option: #JITDOMAIN>
+	^ self genCCallGateFor: aRoutine called: trampolineName returns: true
+]
+
+{ #category : 'jitdomain' }
+SimpleStackBasedCogit >> genCCallGateFor: aRoutine called: trampolineName returns: returns [
+
 	"Generate a gate that calls the C routine aRoutine with the argument registers machine code loaded, on
 	 the C stack, and answer its thunk:
 		domlpad 0, LBL_GATE
@@ -1211,7 +1222,16 @@ SimpleStackBasedCogit >> genCCallGateFor: aRoutine called: trampolineName [
 		call aRoutine
 		restore ra
 		sp, fp := stackPointer, framePointer
-		domret"
+		domret
+	 If returns is false, aRoutine never returns (ceSendFromInLineCacheMiss: continues the send through an
+	 enilopmart or the interpreter). The gate then stops after the call instead of resuming machine code on a
+	 stack nobody restored:
+		domlpad 0, LBL_GATE
+		reload VarBaseReg
+		save sp, fp into stackPointer, framePointer
+		sp := CStackPointer
+		call aRoutine
+		ebreak"
 
 	<var: #trampolineName type: #'char *'>
 	<option: #JITDOMAIN>
@@ -1219,11 +1239,16 @@ SimpleStackBasedCogit >> genCCallGateFor: aRoutine called: trampolineName [
 	gate := methodZoneBase.
 	self jitDomainStartGate: self jitDomainGateLabel.
 	self genSwitchToCStackInGate.
-	self genSaveLinkRegInGate.
-	self CallFullRT: aRoutine.
-	self genRestoreLinkRegInGate.
-	self genSwitchToSmalltalkStackInGate.
-	self genGateReturn.
+	returns
+		ifTrue:
+			[self genSaveLinkRegInGate.
+			 self CallFullRT: aRoutine.
+			 self genRestoreLinkRegInGate.
+			 self genSwitchToSmalltalkStackInGate.
+			 self genGateReturn]
+		ifFalse:
+			[self CallFullRT: aRoutine.
+			 self Stop].
 	^ self jitDomainFinishGateAt: gate called: trampolineName label: self jitDomainGateLabel
 ]
 
@@ -3027,6 +3052,7 @@ SimpleStackBasedCogit >> generateJitDomainPrimitiveGates [
 			cCode: [ #ceSendFromInLineCacheMiss: asUnsignedIntegerPtr ]
 			inSmalltalk: [ self simulatedTrampolineFor: #ceSendFromInLineCacheMiss: ])
 		called: 'ceSendFromInLineCacheMissTrampoline'
+		returns: false
 ]
 
 { #category : 'initialization' }

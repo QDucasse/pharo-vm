@@ -237,6 +237,28 @@ VMRISCV64JITDomainExitTest >> testCCallGateRunsCOnTheCStack [
 ]
 
 { #category : 'tests' }
+VMRISCV64JITDomainExitTest >> testCCallGateThatDoesNotReturnStopsIfTheFunctionReturns [
+
+	"A gate for a C routine that never returns (ceSendFromInLineCacheMiss:) stops after the call: if the routine
+	 returns anyway, machine code does not resume"
+
+	| function thunk startToEnd |
+	function := self fakeCFunction: [ cogit MoveCq: 42 R: ReceiverResultReg ].
+	cogit allocateOpcodes: 40 bytecodes: 0.
+	thunk := cogit genCCallGateFor: function called: 'testCCall' returns: false.
+	cogit methodZone manageFrom: cogit fixedCodeCursor to: memory getMemoryMap codeZoneEnd.
+	startToEnd := self callThunk: thunk.
+	machineSimulator classRegisterValue: 0.
+
+	"Unicorn reports the ebreak as an invalid instruction"
+	self should: [ self runFromTo: startToEnd ] raise: UnicornError.
+
+	self assert: (self wordAt: machineSimulator instructionPointerRegisterValue) equals: 16r00100073.
+	self assert: machineSimulator receiverRegisterValue equals: 42.
+	self assert: machineSimulator classRegisterValue equals: 0
+]
+
+{ #category : 'tests' }
 VMRISCV64JITDomainExitTest >> testCallThroughGatePassesArgumentsAndResult [
 
 	"compileCallThroughGate:… marshals the arguments as compileCallFor:… does, calls the thunk and fetches the
