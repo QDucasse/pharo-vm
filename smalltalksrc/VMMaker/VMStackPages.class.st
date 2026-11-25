@@ -106,8 +106,7 @@ VMStackPages >> couldBeFramePointer: pointer [
 	^(pointer asUnsignedInteger bitAnd: objectMemory wordSize - 1) = 0
 	   and: [pointer asUnsignedInteger
 				between: (stackBasePlus1 - 1) asUnsignedInteger
-				and: (self cCode: [pages asUnsignedInteger]
-							inSmalltalk: [(self stackPageAt: 0) asUnsignedInteger])]
+				and: self highestStackAddress asUnsignedInteger]
 ]
 
 { #category : 'initialization' }
@@ -160,6 +159,16 @@ VMStackPages >> freeStackPageNoAssert: aPage [ "<InterpreterStackPage>"
 VMStackPages >> initialize [
 	"Here we can initialize the variables C initializes to zero.  #initialize methods do /not/ get translated."
 	statNumMaps := statPageCountWhenMappingSum := statMaxPageCountWhenMapping := 0
+]
+
+{ #category : 'page access' }
+VMStackPages >> highestStackAddress [
+	"Answer the address of the highest slot of the stack pages: the last page's baseAddress, since
+	 a page's slots lie above its lastAddress up to its baseAddress included.  Above it come the
+	 padding and the page structs, which are not stack."
+	<returnTypeC: #'char *'>
+	<inline: true>
+	^(self stackPageAt: coInterpreter numStkPages - 1) baseAddress
 ]
 
 { #category : 'initialization' }
@@ -432,8 +441,7 @@ VMStackPages >> pageIndexFor: pointer [ "<Integer>"
 	<inline: true>
 	self assert: ((self cCoerceSimple: pointer to: #'char *')
 					between: stackBasePlus1 - 1
-					and: (self cCode: [self cCoerceSimple: pages to: #'char *']
-							inSmalltalk: [(self stackPageAt: 0) asInteger])).
+					and: self highestStackAddress).
 	^self pageIndexFor: pointer stackBasePlus1: stackBasePlus1 bytesPerPage: bytesPerPage
 ]
 
@@ -603,8 +611,7 @@ VMStackPages >> whereIsMaybeStackThing: anOop [
 	<returnTypeC: 'char *'>
 	(self oop: anOop
 		isGreaterThanOrEqualTo: (stackBasePlus1 - 1)
-		andLessThan: (self cCode: [pages]
-							inSmalltalk: [(self stackPageAt: 0) asUnsignedInteger])) ifTrue:
+		andLessThan: self highestStackAddress + objectMemory wordSize) ifTrue:
 		[^' is in the stack zone'].
 	^nil
 ]
