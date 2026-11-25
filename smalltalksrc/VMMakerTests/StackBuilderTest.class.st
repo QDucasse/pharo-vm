@@ -330,3 +330,18 @@ StackBuilderTest >> testPageHeadFPIsLastFrameFP [
 	self assert: interpreter framePointer
 		equals: stackBuilder page headFP
 ]
+
+{ #category : 'test-VMstate' }
+StackBuilderTest >> testPageStructsStartOnAMemoryPageOfTheirOwn [
+	"Stack frames and the StackPage structs never share a 4 KB memory page, so each can get its own key."
+	| stackPages lastPage structs |
+	stackPages := interpreter stackPages.
+	lastPage := stackPages stackPageAt: interpreter numStkPages - 1.
+	structs := (0 to: interpreter numStkPages - 1) collect: [ :i | (stackPages stackPageAt: i) address ].
+
+	self assert: structs first \\ 4096 equals: 0.
+	self assert: structs first > lastPage baseAddress.
+	self
+		assert: structs last + (interpreter sizeof: VMStackPage)
+		<= (stackPages minStackAddress + interpreter computeStackZoneSize)
+]

@@ -113,8 +113,9 @@ VMStackPages >> couldBeFramePointer: pointer [
 { #category : 'initialization' }
 VMStackPages >> extraStackBytes [
 	"See initializeStack:numSlots:pageSize:stackLimitOffset:stackPageHeadroom:
-	``Because stack pages grow down...''"
-	^objectMemory wordSize
+	``Because stack pages grow down...''.
+	 The rest is room to start the page structs on a page boundary of their own."
+	^objectMemory wordSize + self pageStructAlignment - 1
 ]
 
 { #category : 'page access' }
@@ -169,7 +170,7 @@ VMStackPages >> initializeStack: theStackPages numSlots: stackSlots pageSize: sl
 
 	<var: #theStackPages type: #'char *'>
 	<returnTypeC: #void>
-	| numPages page structStackPageSize pageStructBase count |
+	| numPages page structStackPageSize pageStructBase count alignMask structsOffset |
 	<var: #page type: #'StackPage *'>
 	<var: #pageStructBase type: #'char *'>
 
@@ -179,8 +180,15 @@ VMStackPages >> initializeStack: theStackPages numSlots: stackSlots pageSize: sl
 
 	"Because stack pages grow down baseAddress is at the top of a stack page and so to avoid
 	 subtracting BytesPerWord from baseAddress and lastAddress in the init loop below we simply
-	 push the stackPage array up one word to avoid the overlap.  This word is extraStackBytes."
-	pageStructBase := theStackPages + (numPages * bytesPerPage) + objectMemory wordSize.
+	 push the stackPage array up one word to avoid the overlap.  This word is extraStackBytes.
+	 The array then starts on the next page boundary, so that no memory page holds both stack
+	 frames and page structs: under JITDOMAIN the frames are reachable from machine code and
+	 the structs are not, and the hardware assigns keys per page.  theStackPages is mmapped,
+	 hence page aligned."
+	alignMask := self pageStructAlignment - 1.
+	self assert: ((self oopForPointer: theStackPages) bitAnd: alignMask) = 0.
+	structsOffset := numPages * bytesPerPage + objectMemory wordSize.
+	pageStructBase := theStackPages + (structsOffset + alignMask bitClear: alignMask).
 	
 	pages := self cCode: [self cCoerceSimple: pageStructBase to: #'StackPage *']
 				  inSmalltalk:
@@ -475,6 +483,12 @@ VMStackPages >> pageListIsWellFormed [
 	(self asserta: count = coInterpreter numStkPages) ifFalse:
 		[ok := false].
 	^ok
+]
+
+{ #category : 'initialization' }
+VMStackPages >> pageStructAlignment [
+	"The page structs start on a boundary of this many bytes, the smallest memory page size."
+	^4096
 ]
 
 { #category : 'accessing' }
